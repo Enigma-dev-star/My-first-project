@@ -1,8 +1,16 @@
 node_modules/
 build/
 dist/
+dev-dist/
+android-native-draft/
+.aistudio/
 coverage/
 .DS_Store
 *.log
 .env*
 !.env.example
+.gradle/
+android/.gradle/
+android/app/build/
+android/build/
+android/captures/
