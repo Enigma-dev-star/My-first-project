@@ -1,0 +1,101 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --page-bg: #F5F7F8;
+  --card-bg: #FFFFFF;
+  --card-subtle: #F0F4F2;
+  --text-primary: #17211F;
+  --text-secondary: #626E6A;
+  --text-muted: #7A8783;
+  --primary-teal: #007F73;
+  --accent-teal: #00A896;
+  --border-color: #DCE4E1;
+  --border-subtle: #E8EFEB;
+  --color-warning: #B45309;
+  --color-danger: #DC2626;
+  --color-success: #059669;
+}
+
+.dark {
+  --page-bg: #0E1513;
+  --card-bg: #14201C;
+  --card-subtle: #101A17;
+  --text-primary: #E2E8F0;
+  --text-secondary: #94A3B8;
+  --text-muted: #64748B;
+  --primary-teal: #0F766E;
+  --accent-teal: #14B8A6;
+  --border-color: #1E302B;
+  --border-subtle: #162420;
+  --color-warning: #F59E0B;
+  --color-danger: #EF4444;
+  --color-success: #10B981;
+}
+
+@layer base {
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans Bengali", "Hind Siliguri", "Kalpurush", "SolaimanLipi", "Bangla Sangam MN", "Vrinda", sans-serif;
+    -webkit-tap-highlight-color: transparent;
+    background-color: var(--page-bg);
+    color: var(--text-primary);
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
+    min-height: 100vh;
+    min-height: 100dvh;
+  }
+}
+
+/* Smooth mobile touch scrolling */
+* {
+  touch-action: manipulation;
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 127, 115, 0.2);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 127, 115, 0.4);
+}
+
+@keyframes shopFadeIn {
+  from {
+    opacity: 0.35;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-shop-switch {
+  animation: shopFadeIn 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes toastSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.animate-toast-slide {
+  animation: toastSlideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}

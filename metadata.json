@@ -1,0 +1,6 @@
+{
+  "name": "Muslim Sweets Management System (MSMS)",
+  "description": "An offline-first Android PWA and management system for sweet shops featuring bilingual English/Bengali UI, sales analytics, widgets, and cloud backup.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

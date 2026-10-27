@@ -1,0 +1,1 @@
+{"name":"Muslim Sweets Management System","short_name":"MSMS","description":"Offline-first Android PWA for sweet shops with inventory, sales analytics, and cloud sync.","start_url":"./","display":"standalone","background_color":"#0E1513","theme_color":"#007F73","lang":"en","scope":"./","id":"/","icons":[{"src":"icon.svg","sizes":"512x512","type":"image/svg+xml","purpose":"any"}]}
