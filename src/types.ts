@@ -24,6 +24,7 @@ export interface ShopBranch {
   nameBn: string;
   address: string;
   addressBn?: string;
+  phone?: string;
   country: string;
   currencySymbol: string;
   createdAt: string;
@@ -50,6 +51,7 @@ export interface SweetProduct {
   minStockAlert: number; // Threshold for low stock warning
   createdAt: string;
   updatedAt: string;
+  isDemo?: boolean;
 }
 
 export interface StockEntry {
@@ -63,6 +65,7 @@ export interface StockEntry {
   costPrice: number;
   dateTime: string;      // Synced with device date & time
   notes?: string;
+  isDemo?: boolean;
 }
 
 export interface SaleRecord {
@@ -83,6 +86,7 @@ export interface SaleRecord {
   month: number;          // 0 - 11
   dayOfWeek: number;      // 0 - 6
   isPeak?: boolean;
+  isDemo?: boolean;
 }
 
 export interface BillRecord {
@@ -96,6 +100,7 @@ export interface BillRecord {
   customerName?: string;
   notes?: string;
   dateTime: string;
+  isDemo?: boolean;
 }
 
 export interface TaskCategory {
@@ -113,6 +118,7 @@ export interface ShopTask {
   isCompleted: boolean;
   dueDate?: string;
   completedAt?: string;
+  isDemo?: boolean;
 }
 
 export interface YearlyArchive {
@@ -140,13 +146,14 @@ export interface AppSettings {
   currencySymbol: string;
   yearlyTimelineEnabled: boolean; // default true, toggleable in admin settings
   autoGoogleDrivePrompt: boolean;
+  sessionPersistence?: 'keep_logged_in' | 'ask_every_time'; // Default: 'keep_logged_in'
 }
 
 export interface MSMSBackupData {
   appName: string;
   version: string;
   exportedAt: string;
-  masterAdminName: string;
+  masterAdminName?: string;
   settings: AppSettings;
   shops: ShopBranch[];
   products: SweetProduct[];
@@ -156,4 +163,14 @@ export interface MSMSBackupData {
   archives: YearlyArchive[];
   taskCategories?: { shopId: string; categories: TaskCategory[] }[];
   tasks?: ShopTask[];
+}
+
+export interface EncryptedBackupEnvelope {
+  magic: 'MSMS-BACKUP';
+  v: 1;
+  kdf: 'PBKDF2-SHA256';
+  iter: number;
+  salt: string;
+  iv: string;
+  ct: string;
 }

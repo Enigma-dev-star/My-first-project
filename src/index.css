@@ -34,19 +34,38 @@
   --color-success: #10B981;
 }
 
-@layer base {
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans Bengali", "Hind Siliguri", "Kalpurush", "SolaimanLipi", "Bangla Sangam MN", "Vrinda", sans-serif;
-    -webkit-tap-highlight-color: transparent;
-    background-color: var(--page-bg);
-    color: var(--text-primary);
-    padding-top: env(safe-area-inset-top, 0px);
-    padding-bottom: env(safe-area-inset-bottom, 0px);
-    padding-left: env(safe-area-inset-left, 0px);
-    padding-right: env(safe-area-inset-right, 0px);
-    min-height: 100vh;
-    min-height: 100dvh;
-  }
+html {
+  font-size: clamp(14px, 3.8vw, 16px);
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  height: 100dvh;
+  margin: 0;
+  overflow: hidden;
+}
+
+body {
+  height: 100dvh;
+  margin: 0;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans Bengali", "Hind Siliguri", "Kalpurush", "SolaimanLipi", "Bangla Sangam MN", "Vrinda", sans-serif;
+  -webkit-tap-highlight-color: transparent;
+  background-color: var(--page-bg);
+  color: var(--text-primary);
+}
+
+#root {
+  height: 100dvh;
+  margin: 0;
+  overflow: hidden;
+}
+
+/* Hide scrollbar on tab bar while keeping smooth horizontal scroll */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
 
 /* Smooth mobile touch scrolling */

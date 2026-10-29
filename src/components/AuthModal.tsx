@@ -3,11 +3,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { UserAccount } from '../types';
-import { StorageService, hashString } from '../services/storage';
+import {
+  StorageService,
+  hashPassword,
+  verifyPassword,
+  getLoginLockoutStatus,
+  recordFailedLogin,
+  clearFailedLoginAttempts,
+} from '../services/storage';
 import { TRANSLATIONS } from '../locales/i18n';
-import { Lock, User, ShieldCheck, KeyRound, AlertCircle, Eye, EyeOff } from 'lucide-react';
+import { Lock, User, ShieldCheck, KeyRound, AlertCircle, Eye, EyeOff, Clock } from 'lucide-react';
 
 interface AuthModalProps {
   onSuccess: (user: UserAccount) => void;
@@ -39,9 +46,37 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess, lang }) => {
   const [recoveryAnswerInput, setRecoveryAnswerInput] = useState('');
   const [newPasswordInput, setNewPasswordInput] = useState('');
 
+  // Rate Limiting Lockout state
+  const [lockoutSeconds, setLockoutSeconds] = useState<number>(() => {
+    const status = getLoginLockoutStatus();
+    return status.isLocked ? status.remainingSeconds : 0;
+  });
+
   // UI status
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Countdown timer for lockout
+  useEffect(() => {
+    if (lockoutSeconds <= 0) return;
+    const interval = setInterval(() => {
+      setLockoutSeconds(prev => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [lockoutSeconds]);
+
+  // Selected user for login
+  const selectedUser =
+    StorageService.getUsers().find(u => u.id === selectedUserId) ||
+    masterAdmin ||
+    guestUsers[0] ||
+    null;
 
   // Validate Password criteria: >= 1 Capital, >= 1 Number, >= 1 Symbol
   const validatePasswordComplexity = (pwd: string): boolean => {
@@ -104,9 +139,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess, lang }) => {
 
     setIsSubmitting(true);
     try {
-      const pwdHash = await hashString(password);
-      const answerHash = await hashString(securityAnswer.trim().toLowerCase());
-      const stockEraseHash = await hashString(stockErasePassword.trim());
+      const pwdHash = await hashPassword(password);
+      const answerHash = await hashPassword(securityAnswer.trim().toLowerCase());
+      const stockEraseHash = await hashPassword(stockErasePassword.trim());
 
       const newMaster: UserAccount = {
         id: crypto.randomUUID(),
@@ -121,6 +156,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess, lang }) => {
 
       StorageService.saveUser(newMaster);
       StorageService.setActiveUser(newMaster);
+      clearFailedLoginAttempts();
       onSuccess(newMaster);
     } catch (err) {
       console.error(err);
@@ -134,7 +170,19 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess, lang }) => {
     e.preventDefault();
     setError(null);
 
-    const user = StorageService.getUsers().find(u => u.id === selectedUserId) || masterAdmin;
+    // Check rate limit lockout
+    const lockStatus = getLoginLockoutStatus();
+    if (lockStatus.isLocked) {
+      setLockoutSeconds(lockStatus.remainingSeconds);
+      setError(
+        lang === 'bn'
+          ? `ভুল পাসওয়ার্ডের কারণে লক রয়েছে। ${lockStatus.remainingSeconds} সেকেন্ড পর চেষ্টা করুন।`
+          : `Temporarily locked due to too many failed attempts. Try again in ${lockStatus.remainingSeconds}s.`
+      );
+      return;
+    }
+
+    const user = selectedUser;
     if (!user) {
       setError(lang === 'bn' ? 'ব্যবহারকারী পাওয়া যায়নি।' : 'User not found.');
       return;
@@ -142,14 +190,36 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess, lang }) => {
 
     setIsSubmitting(true);
     try {
-      const inputHash = await hashString(loginPassword);
-      if (inputHash === user.passwordHash) {
+      const verifyResult = await verifyPassword(loginPassword, user.passwordHash);
+      if (verifyResult.valid) {
+        // Transparent upgrade from legacy SHA-256 to PBKDF2-SHA-256
+        if (verifyResult.needsUpgrade) {
+          try {
+            const upgradedHash = await hashPassword(loginPassword);
+            user.passwordHash = upgradedHash;
+            StorageService.saveUser(user);
+          } catch (upgradeErr) {
+            console.warn('Failed transparent hash upgrade', upgradeErr);
+          }
+        }
+
+        clearFailedLoginAttempts();
         StorageService.setActiveUser(user);
         onSuccess(user);
       } else {
-        setError(
-          lang === 'bn' ? 'ভুল পাসওয়ার্ড। আবার চেষ্টা করুন।' : 'Incorrect password.'
-        );
+        const lockout = recordFailedLogin();
+        if (lockout.isLocked) {
+          setLockoutSeconds(lockout.remainingSeconds);
+          setError(
+            lang === 'bn'
+              ? `ভুল পাসওয়ার্ড। অ্যাকাউন্ট সাময়িক লক করা হয়েছে (${lockout.remainingSeconds} সেকেন্ড)।`
+              : `Incorrect password. Account locked for ${lockout.remainingSeconds}s.`
+          );
+        } else {
+          setError(
+            lang === 'bn' ? 'ভুল পাসওয়ার্ড। আবার চেষ্টা করুন।' : 'Incorrect password.'
+          );
+        }
       }
     } catch (err) {
       console.error(err);
@@ -175,11 +245,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess, lang }) => {
 
     setIsSubmitting(true);
     try {
-      const ansHash = await hashString(recoveryAnswerInput.trim().toLowerCase());
-      if (ansHash === masterAdmin.securityAnswerHash) {
-        const newHash = await hashString(newPasswordInput);
+      const verifyAns = await verifyPassword(
+        recoveryAnswerInput.trim().toLowerCase(),
+        masterAdmin.securityAnswerHash
+      );
+      if (verifyAns.valid) {
+        const newHash = await hashPassword(newPasswordInput);
         masterAdmin.passwordHash = newHash;
         StorageService.saveUser(masterAdmin);
+        clearFailedLoginAttempts();
         setIsRecovering(false);
         setLoginPassword(newPasswordInput);
         setError(
@@ -201,8 +275,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess, lang }) => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm overflow-y-auto">
-      <div className="w-full max-w-md bg-white dark:bg-[#14201C] rounded-3xl shadow-2xl border border-[#DCE4E1] dark:border-[#1E302B] overflow-hidden my-auto">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/60 backdrop-blur-sm overflow-y-auto">
+      <div className="w-[min(100vw-1rem,28rem)] max-h-[85dvh] bg-white dark:bg-[#14201C] rounded-3xl shadow-2xl border border-[#DCE4E1] dark:border-[#1E302B] overflow-y-auto my-auto">
         {/* Header Ribbon */}
         <div className="bg-gradient-to-r from-[#005c53] via-[#007F73] to-[#00A896] p-6 text-white text-center relative">
           <div className="w-14 h-14 mx-auto rounded-2xl bg-white/20 backdrop-blur-md flex items-center justify-center mb-3 shadow-inner">
@@ -375,21 +449,33 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess, lang }) => {
                 </div>
               )}
 
-              {/* Displaying Saved Admin Name as specified in notes */}
+              {/* Displaying Currently Selected User Account */}
               <div className="p-3.5 rounded-2xl bg-[#007F73]/10 dark:bg-[#007F73]/20 border border-[#007F73]/30 flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-[#007F73] text-white flex items-center justify-center font-bold text-sm shadow-sm">
-                  {masterAdmin?.name.charAt(0).toUpperCase()}
+                  {selectedUser?.name ? selectedUser.name.charAt(0).toUpperCase() : 'U'}
                 </div>
                 <div>
                   <div className="text-[10px] uppercase font-bold text-[#007F73] dark:text-[#00A896] tracking-wider">
-                    {t.masterAccount}
+                    {selectedUser?.role === 'master_admin' ? t.masterAccount : t.guestAccount}
                   </div>
                   <div className="text-sm font-bold text-[#17211F] dark:text-white">
-                    {masterAdmin?.name}
+                    {selectedUser?.name || 'User'}
                   </div>
                 </div>
                 <ShieldCheck className="w-5 h-5 text-[#007F73] dark:text-[#00A896] ml-auto" />
               </div>
+
+              {/* Lockout Countdown Alert */}
+              {lockoutSeconds > 0 && (
+                <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-900/60 flex items-center gap-2 text-rose-700 dark:text-rose-300 text-xs font-semibold">
+                  <Clock className="w-4 h-4 shrink-0 animate-spin" />
+                  <span>
+                    {lang === 'bn'
+                      ? `ভুল চেষ্টার কারণে অ্যাকাউন্ট সাময়িক লক: ${lockoutSeconds} সেকেন্ড অপেক্ষা করুন`
+                      : `Account locked due to failed attempts: wait ${lockoutSeconds}s`}
+                  </span>
+                </div>
+              )}
 
               <div>
                 <label className="block text-xs font-semibold text-[#17211F] dark:text-stone-200 mb-1">
@@ -400,10 +486,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess, lang }) => {
                   <input
                     type={showPassword ? 'text' : 'password'}
                     required
+                    disabled={lockoutSeconds > 0 || isSubmitting}
                     value={loginPassword}
                     onChange={e => setLoginPassword(e.target.value)}
                     placeholder="••••••••"
-                    className="w-full pl-10 pr-10 py-2.5 bg-[#F0F4F2] dark:bg-[#101A17] border border-[#DCE4E1] dark:border-[#1E302B] rounded-xl text-sm focus:outline-none focus:border-[#007F73] text-[#17211F] dark:text-stone-100 placeholder-[#626E6A]/50"
+                    className="w-full pl-10 pr-10 py-2.5 bg-[#F0F4F2] dark:bg-[#101A17] border border-[#DCE4E1] dark:border-[#1E302B] rounded-xl text-sm focus:outline-none focus:border-[#007F73] text-[#17211F] dark:text-stone-100 placeholder-[#626E6A]/50 disabled:opacity-50"
                   />
                   <button
                     type="button"
@@ -427,8 +514,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess, lang }) => {
 
               <button
                 type="submit"
-                disabled={isSubmitting}
-                className="w-full py-3 bg-[#007F73] hover:bg-[#006e63] text-white font-semibold rounded-xl text-sm shadow-md transition active:scale-[0.98]"
+                disabled={isSubmitting || lockoutSeconds > 0}
+                className="w-full py-3 bg-[#007F73] hover:bg-[#006e63] text-white font-semibold rounded-xl text-sm shadow-md transition active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isSubmitting ? '...' : t.loginBtn}
               </button>

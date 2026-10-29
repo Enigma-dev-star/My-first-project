@@ -6,6 +6,7 @@
 import React, { useState, useEffect } from 'react';
 import { ShopTask, UserAccount, TaskCategory } from '../types';
 import { StorageService } from '../services/storage';
+import { ConfirmDialog } from './ConfirmDialog';
 import {
   CheckSquare,
   Square,
@@ -75,6 +76,8 @@ export const TaskManagementTab: React.FC<TaskManagementTabProps> = ({
 
   // Delete Task Confirmation Modal
   const [taskToDelete, setTaskToDelete] = useState<ShopTask | null>(null);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [catAlertMsg, setCatAlertMsg] = useState<string | null>(null);
 
   // Load categories whenever active shop changes
   useEffect(() => {
@@ -157,15 +160,21 @@ export const TaskManagementTab: React.FC<TaskManagementTabProps> = ({
     onRefresh();
   };
 
+  // Load suggested sweet shop checklist tasks
+  const handleLoadSuggestedTasks = () => {
+    if (!activeShopId) return;
+    StorageService.loadSuggestedTasks(activeShopId);
+    onRefresh();
+  };
+
   // Reset Checklist to sweet shop standard defaults
   const handleResetChecklist = () => {
     if (!isMaster) return;
-    const confirmMsg =
-      lang === 'bn'
-        ? 'আপনি কি নিশ্চিত যে সকল কাজ ও ক্যাটাগরি ডিফল্ট মিষ্টির দোকানের তালিকায় রিসেট করতে চান?'
-        : 'Reset all tasks and ensure standard categories on this sweet shop checklist?';
-    if (!window.confirm(confirmMsg)) return;
+    setShowResetConfirm(true);
+  };
 
+  const executeResetChecklist = () => {
+    setShowResetConfirm(false);
     // Ensure default categories exist
     const defaultCats = [
       { id: 'kitchen', name: 'Kitchen Prep', nameBn: 'রান্নাঘর ও কারিগর' },
@@ -310,7 +319,7 @@ export const TaskManagementTab: React.FC<TaskManagementTabProps> = ({
 
   const handleInitiateDeleteCategory = (cat: TaskCategory) => {
     if (taskCategories.length <= 1) {
-      alert(
+      setCatAlertMsg(
         lang === 'bn'
           ? 'কমপক্ষে একটি ক্যাটাগরি থাকতে হবে।'
           : 'You must have at least one category remaining.'
@@ -348,13 +357,13 @@ export const TaskManagementTab: React.FC<TaskManagementTabProps> = ({
           t.category = reallocateTargetId;
         }
       });
-      localStorage.setItem('msms_tasks_v1', JSON.stringify(allTasks));
+      StorageService.saveAllTasks(allTasks);
     } else if (action === 'deleteTasks') {
       // Delete tasks in this category
       const remainingTasks = StorageService.getTasks().filter(
         t => !(t.shopId === activeShopId && t.category === catId)
       );
-      localStorage.setItem('msms_tasks_v1', JSON.stringify(remainingTasks));
+      StorageService.saveAllTasks(remainingTasks);
     }
 
     StorageService.deleteTaskCategory(activeShopId, catId);
@@ -365,6 +374,20 @@ export const TaskManagementTab: React.FC<TaskManagementTabProps> = ({
     loadCategories();
     onRefresh();
   };
+
+  if (!activeShopId) {
+    return (
+      <div className="p-12 text-center bg-white dark:bg-[#14201C] rounded-3xl border border-[#DCE4E1] dark:border-[#1E302B] shadow-xs">
+        <CheckSquare className="w-10 h-10 mx-auto text-[#007F73]/40 dark:text-teal-400/40 mb-3" />
+        <h4 className="text-sm font-bold text-[#17211F] dark:text-stone-100">
+          {lang === 'bn' ? 'দোকান ব্রাঞ্চ নির্বাচন করুন' : 'No shop branch active'}
+        </h4>
+        <p className="text-xs text-[#626E6A] dark:text-stone-400 mt-1 max-w-sm mx-auto">
+          {lang === 'bn' ? 'চেকলিস্ট ও কাজ পরিচালনা করতে প্রথমে একটি দোকান তৈরি বা নির্বাচন করুন।' : 'Please create or select a shop branch to view and manage tasks.'}
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-5">
@@ -504,7 +527,40 @@ export const TaskManagementTab: React.FC<TaskManagementTabProps> = ({
       </div>
 
       {/* Task Checklist Items */}
-      {filteredTasks.length === 0 ? (
+      {tasks.length === 0 ? (
+        <div className="p-8 text-center bg-white dark:bg-[#14201C] rounded-3xl border border-[#DCE4E1] dark:border-[#1E302B] text-[#626E6A] dark:text-stone-400 text-xs shadow-xs space-y-3">
+          <CheckSquare className="w-10 h-10 text-[#007F73]/40 mx-auto" />
+          <p className="font-bold text-[#17211F] dark:text-stone-100 text-sm">
+            {lang === 'bn' ? 'কোনো চেকলিস্ট কাজ নেই' : 'No checklist tasks yet'}
+          </p>
+          <p className="max-w-xs mx-auto text-stone-500 dark:text-stone-400 text-xs">
+            {lang === 'bn'
+              ? 'নতুন কাজ যোগ করুন অথবা মিষ্টির দোকানের আদর্শ চেকলিস্ট কাজগুলো এক ক্লিকে লোড করুন।'
+              : 'Add tasks manually or load suggested daily sweet shop tasks.'}
+          </p>
+          <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
+            <button
+              onClick={handleLoadSuggestedTasks}
+              className="px-4 py-2 bg-[#007F73]/15 hover:bg-[#007F73]/25 text-[#007F73] dark:text-teal-300 rounded-xl font-bold transition flex items-center gap-1.5"
+            >
+              <Sparkles className="w-4 h-4" />
+              <span>{lang === 'bn' ? 'প্রস্তাবিত দৈনিক কাজ লোড করুন' : 'Load suggested daily tasks'}</span>
+            </button>
+            {isMaster && (
+              <button
+                onClick={() => {
+                  if (taskCategories.length > 0) setCategory(taskCategories[0].id);
+                  setShowAddModal(true);
+                }}
+                className="px-4 py-2 bg-[#007F73] hover:bg-[#00685E] text-white rounded-xl font-semibold transition shadow-xs flex items-center gap-1.5"
+              >
+                <Plus className="w-4 h-4" />
+                <span>{lang === 'bn' ? 'কাজ যোগ করুন' : 'Add Task'}</span>
+              </button>
+            )}
+          </div>
+        </div>
+      ) : filteredTasks.length === 0 ? (
         <div className="p-10 text-center bg-white dark:bg-[#14201C] rounded-3xl border border-[#DCE4E1] dark:border-[#1E302B] text-[#626E6A] dark:text-stone-400 text-xs shadow-xs">
           <p>{lang === 'bn' ? 'এই ক্যাটাগরিতে কোনো কাজ নেই' : 'No tasks in this category'}</p>
           {isMaster && (
@@ -1105,6 +1161,35 @@ export const TaskManagementTab: React.FC<TaskManagementTabProps> = ({
           </div>
         </div>
       )}
+
+      {/* Reset Checklist Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={showResetConfirm}
+        title={lang === 'bn' ? 'চেকলিস্ট রিসেট' : 'Reset Checklist'}
+        message={
+          lang === 'bn'
+            ? 'আপনি কি নিশ্চিত যে সকল কাজ ও ক্যাটাগরি ডিফল্ট মিষ্টির দোকানের তালিকায় রিসেট করতে চান?'
+            : 'Reset all tasks and ensure standard categories on this sweet shop checklist?'
+        }
+        isDanger={true}
+        confirmText={lang === 'bn' ? 'রিসেট করুন' : 'Reset'}
+        cancelText={lang === 'bn' ? 'বাতিল' : 'Cancel'}
+        onConfirm={executeResetChecklist}
+        onCancel={() => setShowResetConfirm(false)}
+        lang={lang}
+      />
+
+      {/* Category Notice Alert Dialog */}
+      <ConfirmDialog
+        isOpen={!!catAlertMsg}
+        title={lang === 'bn' ? 'সতর্কতা' : 'Notice'}
+        message={catAlertMsg || ''}
+        confirmText={lang === 'bn' ? 'ঠিক আছে' : 'OK'}
+        cancelText={lang === 'bn' ? 'বন্ধ করুন' : 'Close'}
+        onConfirm={() => setCatAlertMsg(null)}
+        onCancel={() => setCatAlertMsg(null)}
+        lang={lang}
+      />
     </div>
   );
 };

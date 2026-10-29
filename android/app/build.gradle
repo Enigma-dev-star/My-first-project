@@ -20,17 +20,13 @@ android {
         debug {
             def ks1 = file('msms-debug.keystore')
             def ks2 = rootProject.file('../android-signing/msms-debug.keystore')
-            if (ks1.exists()) {
-                storeFile ks1
-                storePassword 'msms123'
-                keyAlias 'msms'
-                keyPassword 'msms123'
-                storeType 'PKCS12'
-            } else if (ks2.exists()) {
-                storeFile ks2
-                storePassword 'msms123'
-                keyAlias 'msms'
-                keyPassword 'msms123'
+            def envKs = System.getenv("KEYSTORE_FILE") ? file(System.getenv("KEYSTORE_FILE")) : null
+            def targetKs = envKs != null && envKs.exists() ? envKs : (ks1.exists() ? ks1 : (ks2.exists() ? ks2 : null))
+            if (targetKs != null && targetKs.exists()) {
+                storeFile targetKs
+                storePassword System.getenv("KEYSTORE_PASSWORD") ?: 'msms123'
+                keyAlias System.getenv("KEY_ALIAS") ?: 'msms'
+                keyPassword System.getenv("KEY_PASSWORD") ?: 'msms123'
                 storeType 'PKCS12'
             }
         }

@@ -5,6 +5,10 @@
   "server": {
     "androidScheme": "https"
   },
+  "android": {
+    "allowMixedContent": false,
+    "webContentsDebuggingEnabled": false
+  },
   "plugins": {
     "SplashScreen": {
       "launchShowDuration": 1500,

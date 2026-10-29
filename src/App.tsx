@@ -18,6 +18,8 @@ import {
   AppSettings,
 } from './types';
 import { StorageService } from './services/storage';
+import { Vault } from './services/vault';
+import { ConfirmDialog } from './components/ConfirmDialog';
 import { TRANSLATIONS, formatCurrency, formatNumber } from './locales/i18n';
 import { usePWAInstall } from './hooks/usePWAInstall';
 import { SplashAnimation } from './components/SplashAnimation';
@@ -30,6 +32,7 @@ import { AndroidWidgetSimulator } from './components/AndroidWidgetSimulator';
 import { AdminSettingsModal } from './components/AdminSettingsModal';
 import { MultiShopModal } from './components/MultiShopModal';
 import { TaskManagementTab } from './components/TaskManagementTab';
+import { CreateFirstShopModal } from './components/CreateFirstShopModal';
 import {
   Store,
   Plus,
@@ -69,6 +72,7 @@ export default function App() {
   const [showMultiShopModal, setShowMultiShopModal] = useState(false);
   const [showUserDropdown, setShowUserDropdown] = useState(false);
   const [showQuickShopDropdown, setShowQuickShopDropdown] = useState(false);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
 
   // Native Platform & Data Safety
   const isNative = Capacitor.isNativePlatform();
@@ -94,11 +98,18 @@ export default function App() {
     }
   }, [isDark]);
 
-  // Synchronize native Android status bar with theme
+  // Synchronize native Android status bar with theme (Stage 4)
   useEffect(() => {
     if (Capacitor.isNativePlatform()) {
-      StatusBar.setBackgroundColor({ color: isDark ? '#0E1513' : '#007F73' }).catch(() => {});
-      StatusBar.setStyle({ style: isDark ? Style.Dark : Style.Light }).catch(() => {});
+      (async () => {
+        try {
+          await StatusBar.setOverlaysWebView({ overlay: false });
+          await StatusBar.setBackgroundColor({ color: isDark ? '#0E1513' : '#FFFFFF' });
+          await StatusBar.setStyle({ style: isDark ? Style.Dark : Style.Light });
+        } catch (err) {
+          console.warn('StatusBar update failed', err);
+        }
+      })();
     }
   }, [isDark]);
 
@@ -109,13 +120,16 @@ export default function App() {
     }
   }, []);
 
-  // Live Digital Clock (Uses device local time)
-  const [currentTimeStr, setCurrentTimeStr] = useState<string>('');
+  // Live Digital Clock (Uses device local time - with and without seconds)
+  const [currentTime, setCurrentTime] = useState({ withSec: '', noSec: '' });
 
   useEffect(() => {
     const updateTime = () => {
       const now = new Date();
-      setCurrentTimeStr(now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+      setCurrentTime({
+        withSec: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        noSec: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      });
     };
     updateTime();
     const interval = setInterval(updateTime, 1000);
@@ -141,6 +155,7 @@ export default function App() {
   const showAuthModalRef = useRef(showAuthModal);
   const showQuickShopDropdownRef = useRef(showQuickShopDropdown);
   const showUserDropdownRef = useRef(showUserDropdown);
+  const showLogoutConfirmRef = useRef(showLogoutConfirm);
   const currentUserRef = useRef(currentUser);
   const activeTabRef = useRef(activeTab);
 
@@ -149,8 +164,22 @@ export default function App() {
   useEffect(() => { showAuthModalRef.current = showAuthModal; }, [showAuthModal]);
   useEffect(() => { showQuickShopDropdownRef.current = showQuickShopDropdown; }, [showQuickShopDropdown]);
   useEffect(() => { showUserDropdownRef.current = showUserDropdown; }, [showUserDropdown]);
+  useEffect(() => { showLogoutConfirmRef.current = showLogoutConfirm; }, [showLogoutConfirm]);
   useEffect(() => { currentUserRef.current = currentUser; }, [currentUser]);
   useEffect(() => { activeTabRef.current = activeTab; }, [activeTab]);
+
+  const activeTabButtonRef = useRef<HTMLButtonElement>(null);
+  const tabContainerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (activeTabButtonRef.current) {
+      activeTabButtonRef.current.scrollIntoView({
+        behavior: 'smooth',
+        block: 'nearest',
+        inline: 'center',
+      });
+    }
+  }, [activeTab]);
 
   // Hardware Back Button: Modals -> Popovers -> Overview Tab -> Exit App
   useEffect(() => {
@@ -158,6 +187,16 @@ export default function App() {
 
     let cleanup: (() => void) | undefined;
     CapApp.addListener('backButton', () => {
+      // 1. If logout confirm dialog is open, dismiss it first
+      if (showLogoutConfirmRef.current) {
+        setShowLogoutConfirm(false);
+        return;
+      }
+      // 2. If logged out / no user, exit app (never show dashboard)
+      if (!currentUserRef.current) {
+        CapApp.exitApp();
+        return;
+      }
       if (showSettingsModalRef.current) {
         setShowSettingsModal(false);
         return;
@@ -204,35 +243,33 @@ export default function App() {
     const activeUser = StorageService.getActiveUser();
     const masterAdmin = StorageService.getMasterAdmin();
 
-    if (!masterAdmin || !activeUser) {
+    const isColdBoot = !sessionStorage.getItem('msms_session_unlocked');
+    const requireLoginOnBoot = loadedSettings.sessionPersistence === 'ask_every_time' && isColdBoot;
+
+    if (!masterAdmin || !activeUser || requireLoginOnBoot) {
+      if (requireLoginOnBoot) {
+        StorageService.setActiveUser(null);
+      }
+      setCurrentUser(null);
       setShowAuthModal(true);
     } else {
       setCurrentUser(activeUser);
+      sessionStorage.setItem('msms_session_unlocked', 'true');
     }
 
     // Check yearly timeline transition
     StorageService.checkAndPerformYearlyRollover();
 
     const loadedShops = StorageService.getShops();
-    // If no shops exist yet on first boot, initialize with Maniknagar Muslim Sweets as requested in reference
-    if (loadedShops.length === 0) {
-      const defaultShop: ShopBranch = {
-        id: crypto.randomUUID(),
-        name: 'Maniknagar Muslim Sweets',
-        nameBn: 'মানিকনগর মুসলিম সুইটস',
-        address: 'Maniknagar Bazar, Dhaka',
-        country: 'BD',
-        currencySymbol: '৳',
-        createdAt: new Date().toISOString(),
-      };
-      StorageService.saveShop(defaultShop);
-      setShops([defaultShop]);
-      setActiveShopId(defaultShop.id);
-      StorageService.setActiveShopId(defaultShop.id);
+    setShops(loadedShops);
+    if (loadedShops.length > 0) {
+      const activeId = StorageService.getActiveShopId();
+      const validActiveId = loadedShops.some(s => s.id === activeId) ? activeId : loadedShops[0].id;
+      setActiveShopId(validActiveId);
+      StorageService.setActiveShopId(validActiveId);
     } else {
-      setShops(loadedShops);
-      const activeId = StorageService.getActiveShopId() || loadedShops[0].id;
-      setActiveShopId(activeId);
+      setActiveShopId('');
+      StorageService.setActiveShopId('');
     }
   }, [refreshKey]);
 
@@ -395,8 +432,22 @@ export default function App() {
 
   // Logout
   const handleLogout = () => {
+    setShowSettingsModal(false);
+    setShowUserDropdown(false);
+    setShowQuickShopDropdown(false);
+    setShowLogoutConfirm(true);
+  };
+
+  const performLogout = () => {
     StorageService.setActiveUser(null);
+    sessionStorage.removeItem('msms_session_unlocked');
     setCurrentUser(null);
+    setShowLogoutConfirm(false);
+    setShowSettingsModal(false);
+    setShowMultiShopModal(false);
+    setShowQuickShopDropdown(false);
+    setShowUserDropdown(false);
+    setActiveTab('overview');
     setShowAuthModal(true);
   };
 
@@ -409,6 +460,23 @@ export default function App() {
           setShowSplash(false);
         }}
       />
+    );
+  }
+
+  // When not authenticated: render blocking login screen without any dashboard, shop name, or data behind it
+  if (!currentUser) {
+    return (
+      <div className={`h-dvh w-full flex items-center justify-center p-4 overflow-y-auto ${isDark ? 'dark bg-[#0E1513]' : 'bg-[#F5F7F8]'}`}>
+        <AuthModal
+          lang={lang}
+          onSuccess={user => {
+            sessionStorage.setItem('msms_session_unlocked', 'true');
+            setCurrentUser(user);
+            setShowAuthModal(false);
+            triggerRefresh();
+          }}
+        />
+      </div>
     );
   }
 
@@ -426,14 +494,23 @@ export default function App() {
     : 'bg-[#FFFFFF]/95 border-[#DCE4E1] shadow-xs';
 
   return (
-    <div className={`min-h-screen transition-colors duration-300 ${themeClasses}`}>
-      {/* AUTHENTICATION MODAL */}
-      {showAuthModal && (
-        <AuthModal
+    <div className={`flex flex-col h-dvh w-full overflow-hidden transition-colors duration-300 ${themeClasses}`}>
+      {/* Decryption Error Banner */}
+      {Vault.hasDecryptionError() && (
+        <div className="bg-rose-700 text-white px-4 py-2 text-xs font-bold text-center flex items-center justify-center gap-2 shrink-0 z-50">
+          <span>⚠️ {lang === 'bn' ? 'ডাটা ডিক্রিপশন ত্রুটি: সংরক্ষিত ডাটা পড়তে সমস্যা হয়েছে।' : 'Data decryption error: Stored vault data could not be decrypted.'}</span>
+        </div>
+      )}
+
+      {/* FIRST SHOP SETUP MODAL (Non-skippable on first run) */}
+      {currentUser && shops.length === 0 && (
+        <CreateFirstShopModal
           lang={lang}
-          onSuccess={user => {
-            setCurrentUser(user);
-            setShowAuthModal(false);
+          currencySymbol={settings.currencySymbol}
+          country={settings.currentCountry}
+          onShopCreated={newShop => {
+            setShops([newShop]);
+            setActiveShopId(newShop.id);
             triggerRefresh();
           }}
         />
@@ -452,6 +529,7 @@ export default function App() {
             triggerRefresh();
           }}
           onRefresh={triggerRefresh}
+          onLogout={handleLogout}
         />
       )}
 
@@ -471,184 +549,398 @@ export default function App() {
         />
       )}
 
-      {/* TOP BAR (Directly matching the reference layout) */}
-      <header className={`sticky top-0 z-40 backdrop-blur-md border-b px-4 py-2.5 transition-colors ${headerSurface}`}>
-        <div className="max-w-7xl mx-auto flex items-center justify-between gap-3">
-          {/* Left: Brand + Multi-Shop Dropdown Switcher */}
-          <div className="flex items-center gap-3">
-            {/* Logo Badge */}
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-teal-800 to-teal-600 p-0.5 shadow-sm flex items-center justify-center shrink-0">
-              <img
-                src="/icon.svg"
-                alt="MSMS"
-                className="w-9 h-9 rounded-lg object-contain"
-              />
-            </div>
-
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="font-extrabold text-base tracking-tight text-[#007F73] dark:text-teal-400">
-                  MSMS
-                </span>
-                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-[#007F73]/10 dark:bg-teal-950/80 text-[#007F73] dark:text-teal-300">
-                  Muslim Sweets
-                </span>
+      {/* TOP BAR: shrink-0, fixed at top, safe-area padded */}
+      <header
+        className={`shrink-0 z-30 border-b px-2 sm:px-4 py-2 transition-colors ${headerSurface}`}
+        style={{ paddingTop: 'max(0.5rem, env(safe-area-inset-top, 0px))' }}
+      >
+        <div className="max-w-7xl mx-auto flex flex-col gap-2">
+          {/* Row 1: Brand/Logo + Shop Switcher + (Desktop Cluster OR Mobile Profile+Logout) */}
+          <div className="flex items-center justify-between gap-1.5 sm:gap-3 w-full">
+            {/* Left: Brand Logo + Shop Quick-Switcher */}
+            <div className="flex items-center gap-2 min-w-0 flex-1">
+              {/* Logo Badge */}
+              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-teal-800 to-teal-600 p-0.5 shadow-sm flex items-center justify-center shrink-0">
+                <img
+                  src="/icon.svg"
+                  alt="MSMS"
+                  className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg object-contain"
+                />
               </div>
 
-              {/* Dynamic Shop Selector & Quick-Switcher Dropdown */}
-              <div className="relative" ref={quickShopDropdownRef}>
-                <button
-                  type="button"
-                  onClick={() => setShowQuickShopDropdown(!showQuickShopDropdown)}
-                  className="flex items-center gap-1.5 text-xs font-semibold text-[#17211F] dark:text-stone-300 hover:text-[#007F73] dark:hover:text-teal-300 transition group mt-0.5 px-1.5 py-0.5 rounded-lg hover:bg-[#F0F4F2] dark:hover:bg-[#162420]"
-                  title="Click for quick branch switch or press Alt+S"
-                >
-                  <Store className="w-3.5 h-3.5 text-[#007F73] shrink-0" />
-                  <span className="font-bold underline decoration-dotted underline-offset-2">
-                    {activeShop ? (lang === 'bn' ? activeShop.nameBn || activeShop.name : activeShop.name) : 'Select Shop'}
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5">
+                  <span className="font-extrabold text-sm sm:text-base tracking-tight text-[#007F73] dark:text-teal-400">
+                    MSMS
                   </span>
-                  <ChevronDown className={`w-3 h-3 text-[#626E6A] dark:text-stone-400 group-hover:text-[#007F73] transition-transform duration-200 ${showQuickShopDropdown ? 'rotate-180 text-[#007F73]' : ''}`} />
-                </button>
+                  <span className="hidden min-[400px]:inline-block text-[9px] sm:text-[10px] font-semibold px-1.5 py-0.2 rounded-full bg-[#007F73]/10 dark:bg-teal-950/80 text-[#007F73] dark:text-teal-300 truncate max-w-[120px]">
+                    {activeShop ? (lang === 'bn' ? activeShop.nameBn || activeShop.name : activeShop.name) : (lang === 'bn' ? 'আপনার দোকান' : 'Your Shop')}
+                  </span>
+                </div>
 
-                {/* Floating Quick-Switch Popover Menu */}
-                {showQuickShopDropdown && (
-                  <div className="absolute left-0 mt-2 w-80 sm:w-96 rounded-2xl bg-white dark:bg-[#14201C] border border-[#DCE4E1] dark:border-[#1E302B] shadow-2xl z-50 overflow-hidden animate-toast-slide">
-                    <div className="p-3 bg-[#F0F4F2] dark:bg-[#101A17] border-b border-[#DCE4E1] dark:border-[#1E302B] flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <Store className="w-4 h-4 text-[#007F73]" />
-                        <span className="text-xs font-bold text-[#17211F] dark:text-stone-200">
-                          {lang === 'bn' ? 'ব্রাঞ্চ দ্রুত পরিবর্তন' : 'Switch Shop Branch'}
+                {/* Dynamic Shop Selector & Quick-Switcher Dropdown */}
+                <div className="relative" ref={quickShopDropdownRef}>
+                  <button
+                    type="button"
+                    onClick={() => setShowQuickShopDropdown(!showQuickShopDropdown)}
+                    className="flex items-center gap-1 text-xs font-semibold text-[#17211F] dark:text-stone-300 hover:text-[#007F73] dark:hover:text-teal-300 transition group mt-0.5 px-1 py-0.5 rounded-lg hover:bg-[#F0F4F2] dark:hover:bg-[#162420] max-w-[130px] min-[400px]:max-w-[180px] sm:max-w-xs"
+                    title="Click for quick branch switch or press Alt+S"
+                  >
+                    <Store className="w-3.5 h-3.5 text-[#007F73] shrink-0" />
+                    <span className="font-bold underline decoration-dotted underline-offset-2 truncate">
+                      {activeShop ? (lang === 'bn' ? activeShop.nameBn || activeShop.name : activeShop.name) : (lang === 'bn' ? 'আপনার দোকান' : 'Your Shop')}
+                    </span>
+                    <ChevronDown className={`w-3 h-3 text-[#626E6A] dark:text-stone-400 group-hover:text-[#007F73] transition-transform duration-200 shrink-0 ${showQuickShopDropdown ? 'rotate-180 text-[#007F73]' : ''}`} />
+                  </button>
+
+                  {/* Floating Quick-Switch Popover Menu */}
+                  {showQuickShopDropdown && (
+                    <div className="absolute left-0 mt-2 w-[min(calc(100vw-2rem),20rem)] sm:w-96 rounded-2xl bg-white dark:bg-[#14201C] border border-[#DCE4E1] dark:border-[#1E302B] shadow-2xl z-50 overflow-hidden animate-toast-slide">
+                      <div className="p-3 bg-[#F0F4F2] dark:bg-[#101A17] border-b border-[#DCE4E1] dark:border-[#1E302B] flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Store className="w-4 h-4 text-[#007F73]" />
+                          <span className="text-xs font-bold text-[#17211F] dark:text-stone-200">
+                            {lang === 'bn' ? 'ব্রাঞ্চ দ্রুত পরিবর্তন' : 'Switch Shop Branch'}
+                          </span>
+                        </div>
+                        <span className="text-[10px] font-mono text-[#626E6A] dark:text-stone-500">
+                          Alt + 1..{Math.min(9, Math.max(1, shops.length))}
                         </span>
                       </div>
-                      <span className="text-[10px] font-mono text-[#626E6A] dark:text-stone-500">
-                        Alt + 1..{Math.min(9, shops.length)}
-                      </span>
-                    </div>
 
-                    <div className="p-2 space-y-1 max-h-72 overflow-y-auto">
-                      {shops.map((shop, idx) => {
-                        const isActive = shop.id === activeShopId;
-                        const summary = StorageService.getShopSummary(shop.id);
-                        const displayName = lang === 'bn' ? (shop.nameBn || shop.name) : shop.name;
+                      <div className="p-2 space-y-1 max-h-72 overflow-y-auto">
+                        {shops.length === 0 ? (
+                          <div className="p-4 text-center text-xs text-[#626E6A] dark:text-stone-400 space-y-2">
+                            <p>{lang === 'bn' ? 'কোনো দোকান ব্রাঞ্চ নেই' : 'No shop branches created yet'}</p>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setShowQuickShopDropdown(false);
+                                setShowMultiShopModal(true);
+                              }}
+                              className="px-3 py-1.5 bg-[#007F73] text-white rounded-xl font-bold text-xs"
+                            >
+                              {lang === 'bn' ? '+ দোকান যোগ করুন' : '+ Add Shop'}
+                            </button>
+                          </div>
+                        ) : (
+                          shops.map((shop, idx) => {
+                          const isActive = shop.id === activeShopId;
+                          const summary = StorageService.getShopSummary(shop.id);
+                          const displayName = lang === 'bn' ? (shop.nameBn || shop.name) : shop.name;
 
-                        return (
-                          <div
-                            key={shop.id}
-                            onClick={() => handleSwitchShop(shop.id)}
-                            className={`p-2.5 rounded-xl transition flex items-center justify-between gap-2.5 cursor-pointer select-none ${
-                              isActive
-                                ? 'bg-[#F0F4F2] dark:bg-teal-950/60 border border-[#007F73]/40 text-[#007F73] dark:text-teal-100'
-                                : 'hover:bg-[#F0F4F2] dark:hover:bg-[#1A2823] text-[#17211F] dark:text-stone-200 border border-transparent'
-                            }`}
-                          >
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center gap-2">
-                                <span className={`w-2 h-2 rounded-full shrink-0 ${isActive ? 'bg-[#007F73] animate-pulse' : 'bg-stone-300 dark:bg-stone-600'}`} />
-                                <p className="font-bold text-xs truncate">{displayName}</p>
+                          return (
+                            <div
+                              key={shop.id}
+                              onClick={() => handleSwitchShop(shop.id)}
+                              className={`p-2.5 rounded-xl transition flex items-center justify-between gap-2.5 cursor-pointer select-none ${
+                                isActive
+                                  ? 'bg-[#F0F4F2] dark:bg-teal-950/60 border border-[#007F73]/40 text-[#007F73] dark:text-teal-100'
+                                  : 'hover:bg-[#F0F4F2] dark:hover:bg-[#1A2823] text-[#17211F] dark:text-stone-200 border border-transparent'
+                              }`}
+                            >
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-2">
+                                  <span className={`w-2 h-2 rounded-full shrink-0 ${isActive ? 'bg-[#007F73] animate-pulse' : 'bg-stone-300 dark:bg-stone-600'}`} />
+                                  <p className="font-bold text-xs truncate">{displayName}</p>
+                                  {isActive && (
+                                    <span className="text-[9px] font-bold uppercase tracking-wider bg-[#007F73]/15 dark:bg-teal-900 text-[#007F73] dark:text-teal-200 px-1.5 py-0.2 rounded-full">
+                                      Active
+                                    </span>
+                                  )}
+                                </div>
+                                {shop.address && (
+                                  <p className="text-[10px] text-[#626E6A] dark:text-stone-400 truncate mt-0.5 pl-4">
+                                    {shop.address}
+                                  </p>
+                                )}
+                                <div className="flex items-center gap-2 text-[10px] text-[#626E6A] dark:text-stone-400 mt-1 pl-4 font-mono">
+                                  <span className="text-[#007F73] dark:text-teal-400 font-semibold">{summary.totalStock} kg stock</span>
+                                  <span>·</span>
+                                  <span className="text-amber-700 dark:text-amber-400 font-semibold">৳ {summary.todaySales} today</span>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-2 shrink-0">
+                                <kbd className="hidden sm:inline-block px-1.5 py-0.5 rounded bg-[#F0F4F2] dark:bg-stone-800 border border-[#DCE4E1] dark:border-stone-700 text-[10px] font-mono text-[#626E6A] dark:text-stone-400">
+                                  Alt+{idx + 1}
+                                </kbd>
                                 {isActive && (
-                                  <span className="text-[9px] font-bold uppercase tracking-wider bg-[#007F73]/15 dark:bg-teal-900 text-[#007F73] dark:text-teal-200 px-1.5 py-0.2 rounded-full">
-                                    Active
-                                  </span>
+                                  <Check className="w-4 h-4 text-[#007F73] dark:text-teal-400" />
                                 )}
                               </div>
-                              {shop.address && (
-                                <p className="text-[10px] text-[#626E6A] dark:text-stone-400 truncate mt-0.5 pl-4">
-                                  {shop.address}
-                                </p>
-                              )}
-                              <div className="flex items-center gap-2 text-[10px] text-[#626E6A] dark:text-stone-400 mt-1 pl-4 font-mono">
-                                <span className="text-[#007F73] dark:text-teal-400 font-semibold">{summary.totalStock} kg stock</span>
-                                <span>·</span>
-                                <span className="text-amber-700 dark:text-amber-400 font-semibold">৳ {summary.todaySales} today</span>
-                              </div>
                             </div>
+                          );
+                        }))}
+                      </div>
 
-                            <div className="flex items-center gap-2 shrink-0">
-                              <kbd className="hidden sm:inline-block px-1.5 py-0.5 rounded bg-[#F0F4F2] dark:bg-stone-800 border border-[#DCE4E1] dark:border-stone-700 text-[10px] font-mono text-[#626E6A] dark:text-stone-400">
-                                Alt+{idx + 1}
-                              </kbd>
-                              {isActive && (
-                                <Check className="w-4 h-4 text-[#007F73] dark:text-teal-400" />
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
+                      <div className="p-2 bg-[#F0F4F2] dark:bg-[#101A17] border-t border-[#DCE4E1] dark:border-[#1E302B] flex items-center justify-between gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowQuickShopDropdown(false);
+                            setShowMultiShopModal(true);
+                          }}
+                          className="flex-1 py-1.5 px-3 text-xs font-bold text-[#007F73] dark:text-teal-400 hover:bg-[#007F73]/10 dark:hover:bg-teal-950/40 rounded-xl transition flex items-center justify-center gap-1.5"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>{lang === 'bn' ? '+ নতুন ব্রাঞ্চ' : '+ Add Branch'}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowQuickShopDropdown(false);
+                            setShowMultiShopModal(true);
+                          }}
+                          className="py-1.5 px-3 text-xs font-semibold text-[#626E6A] dark:text-stone-400 hover:text-[#17211F] dark:hover:text-stone-100 rounded-xl transition"
+                        >
+                          {lang === 'bn' ? 'সকল ব্রাঞ্চ' : 'Manage All'}
+                        </button>
+                      </div>
                     </div>
+                  )}
+                </div>
+              </div>
+            </div>
 
-                    <div className="p-2 bg-[#F0F4F2] dark:bg-[#101A17] border-t border-[#DCE4E1] dark:border-[#1E302B] flex items-center justify-between gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowQuickShopDropdown(false);
-                          setShowMultiShopModal(true);
-                        }}
-                        className="flex-1 py-1.5 px-3 text-xs font-bold text-[#007F73] dark:text-teal-400 hover:bg-[#007F73]/10 dark:hover:bg-teal-950/40 rounded-xl transition flex items-center justify-center gap-1.5"
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                        <span>{lang === 'bn' ? '+ নতুন ব্রাঞ্চ' : '+ Add Branch'}</span>
-                      </button>
+            {/* Right Action Cluster - Desktop (>= 640px) */}
+            <div className="hidden sm:flex items-center gap-2 shrink-0">
+              {/* Real-time Clock Pill */}
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#F0F4F2] dark:bg-[#162420] border border-[#DCE4E1] dark:border-[#1E322C] text-xs font-mono font-semibold text-[#17211F] dark:text-teal-300">
+                <span className="w-2 h-2 rounded-full bg-[#007F73] animate-pulse" />
+                <span>{currentTime.withSec}</span>
+              </div>
 
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowQuickShopDropdown(false);
-                          setShowMultiShopModal(true);
-                        }}
-                        className="py-1.5 px-3 text-xs font-semibold text-[#626E6A] dark:text-stone-400 hover:text-[#17211F] dark:hover:text-stone-100 rounded-xl transition"
-                      >
-                        {lang === 'bn' ? 'সকল ব্রাঞ্চ' : 'Manage All'}
-                      </button>
-                    </div>
+              {/* Language Switcher Pill */}
+              <div className="flex items-center p-0.5 rounded-xl bg-[#F0F4F2] dark:bg-[#162420] border border-[#DCE4E1] dark:border-[#1E322C] text-xs font-bold">
+                <button
+                  onClick={handleToggleLanguage}
+                  className={`min-h-[36px] px-2.5 py-1 rounded-lg transition ${
+                    lang === 'bn'
+                      ? 'bg-[#007F73] text-white shadow-xs'
+                      : 'text-[#626E6A] dark:text-stone-400 hover:text-[#17211F]'
+                  }`}
+                >
+                  বাংলা
+                </button>
+                <button
+                  onClick={handleToggleLanguage}
+                  className={`min-h-[36px] px-2.5 py-1 rounded-lg transition ${
+                    lang === 'en'
+                      ? 'bg-[#007F73] text-white shadow-xs'
+                      : 'text-[#626E6A] dark:text-stone-400 hover:text-[#17211F]'
+                  }`}
+                >
+                  EN
+                </button>
+              </div>
+
+              {/* Drive Sync Button */}
+              <button
+                onClick={() => StorageService.downloadGoogleDriveBackupFile()}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#F0F4F2] dark:bg-[#162420] hover:bg-[#E4ECE9] dark:hover:bg-[#1E322C] border border-[#DCE4E1] dark:border-[#1E322C] text-xs font-semibold text-[#17211F] dark:text-stone-300 transition min-h-[36px]"
+                title="Download structured backup for Google Drive"
+              >
+                <Cloud className="w-3.5 h-3.5 text-[#007F73]" />
+                <span>Drive Sync</span>
+              </button>
+
+              {/* APK Button (Hidden when running as native Android app) */}
+              {!isNative && (
+                <button
+                  onClick={() => {
+                    if (isInstallable) {
+                      install();
+                    } else {
+                      setActiveTab('widget');
+                    }
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#007F73] hover:bg-[#00685E] text-white text-xs font-bold transition shadow-xs min-h-[36px]"
+                  title="Install or Export APK"
+                >
+                  <Smartphone className="w-3.5 h-3.5" />
+                  <span>APK</span>
+                </button>
+              )}
+
+              {/* Theme Toggle Button */}
+              <button
+                onClick={() => setIsDark(!isDark)}
+                className="w-9 h-9 flex items-center justify-center rounded-xl text-[#626E6A] dark:text-stone-400 hover:bg-[#F0F4F2] dark:hover:bg-[#162420] transition"
+                title="Toggle Light / Dark Eye Comfort Mode"
+              >
+                {isDark ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-[#17211F]" />}
+              </button>
+
+              {/* Profile Dropdown */}
+              <div className="relative">
+                <button
+                  onClick={() => setShowUserDropdown(!showUserDropdown)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#F0F4F2] dark:bg-[#162420] border border-[#DCE4E1] dark:border-[#1E322C] text-xs font-bold text-[#17211F] dark:text-stone-200 hover:border-[#007F73] transition min-h-[36px]"
+                >
+                  <Crown className="w-3.5 h-3.5 text-amber-500" />
+                  <span className="max-w-[70px] truncate">{currentUser?.name || 'Admin'}</span>
+                  <ChevronDown className="w-3 h-3 text-[#626E6A] dark:text-stone-400" />
+                </button>
+
+                {showUserDropdown && (
+                  <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-[#162420] rounded-2xl shadow-xl border border-[#DCE4E1] dark:border-[#1E322C] p-1.5 z-50 text-xs">
+                    <button
+                      onClick={() => {
+                        setShowMultiShopModal(true);
+                        setShowUserDropdown(false);
+                      }}
+                      className="w-full text-left px-3 py-2 rounded-xl hover:bg-[#F0F4F2] dark:hover:bg-white/5 flex items-center gap-2 font-semibold text-[#17211F] dark:text-stone-300 min-h-[40px]"
+                    >
+                      <Store className="w-4 h-4 text-[#007F73]" />
+                      <span>{lang === 'bn' ? 'দোকান পরিবর্তন / যোগ' : 'Switch / Add Shop'}</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setShowSettingsModal(true);
+                        setShowUserDropdown(false);
+                      }}
+                      className="w-full text-left px-3 py-2 rounded-xl hover:bg-[#F0F4F2] dark:hover:bg-white/5 flex items-center gap-2 font-semibold text-[#17211F] dark:text-stone-300 min-h-[40px]"
+                    >
+                      <Settings className="w-4 h-4 text-[#626E6A]" />
+                      <span>{t.settings}</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setShowUserDropdown(false);
+                        handleLogout();
+                      }}
+                      className="w-full text-left px-3 py-2 rounded-xl hover:bg-rose-50 dark:hover:bg-rose-950/30 flex items-center gap-2 font-semibold text-rose-600 dark:text-rose-400 min-h-[40px]"
+                    >
+                      <LogOut className="w-4 h-4" />
+                      <span>{lang === 'bn' ? 'লগ আউট' : 'Log out'}</span>
+                    </button>
                   </div>
                 )}
               </div>
             </div>
+
+            {/* Right Cluster - Mobile Only (< 640px) */}
+            <div className="flex sm:hidden items-center gap-1 shrink-0">
+              {/* Profile Dropdown for Mobile */}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setShowUserDropdown(!showUserDropdown)}
+                  className="min-w-[40px] min-h-[40px] flex items-center justify-center gap-1 px-2 rounded-xl bg-[#F0F4F2] dark:bg-[#162420] border border-[#DCE4E1] dark:border-[#1E322C] text-xs font-bold text-[#17211F] dark:text-stone-200"
+                  aria-label="User account"
+                >
+                  <Crown className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                  <span className="max-w-[45px] truncate text-[11px]">{currentUser?.name || 'User'}</span>
+                </button>
+
+                {showUserDropdown && (
+                  <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-[#162420] rounded-2xl shadow-xl border border-[#DCE4E1] dark:border-[#1E322C] p-1.5 z-50 text-xs">
+                    <button
+                      onClick={() => {
+                        setShowMultiShopModal(true);
+                        setShowUserDropdown(false);
+                      }}
+                      className="w-full text-left px-3 py-2 rounded-xl hover:bg-[#F0F4F2] dark:hover:bg-white/5 flex items-center gap-2 font-semibold text-[#17211F] dark:text-stone-300 min-h-[40px]"
+                    >
+                      <Store className="w-4 h-4 text-[#007F73]" />
+                      <span>{lang === 'bn' ? 'দোকান পরিবর্তন / যোগ' : 'Switch / Add Shop'}</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setShowSettingsModal(true);
+                        setShowUserDropdown(false);
+                      }}
+                      className="w-full text-left px-3 py-2 rounded-xl hover:bg-[#F0F4F2] dark:hover:bg-white/5 flex items-center gap-2 font-semibold text-[#17211F] dark:text-stone-300 min-h-[40px]"
+                    >
+                      <Settings className="w-4 h-4 text-[#626E6A]" />
+                      <span>{t.settings}</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setShowUserDropdown(false);
+                        handleLogout();
+                      }}
+                      className="w-full text-left px-3 py-2 rounded-xl hover:bg-rose-50 dark:hover:bg-rose-950/30 flex items-center gap-2 font-semibold text-rose-600 dark:text-rose-400 min-h-[40px]"
+                    >
+                      <LogOut className="w-4 h-4" />
+                      <span>{lang === 'bn' ? 'লগ আউট' : 'Log out'}</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Direct Mobile Logout Button (40x40 touch target) */}
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="w-10 h-10 flex items-center justify-center rounded-xl text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition shrink-0"
+                title={lang === 'bn' ? 'লগ আউট' : 'Log out'}
+                aria-label="Log out"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
+            </div>
           </div>
 
-          {/* Right Action Cluster */}
-          <div className="flex items-center gap-2">
-            {/* Real-time Clock Pill */}
-            <div className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#F0F4F2] dark:bg-[#162420] border border-[#DCE4E1] dark:border-[#1E322C] text-xs font-mono font-semibold text-[#17211F] dark:text-teal-300">
-              <span className="w-2 h-2 rounded-full bg-[#007F73] animate-pulse" />
-              <span>{currentTimeStr}</span>
+          {/* Row 2: Mobile Only (< 640px) Quick-Access Bar (Clock, Language, Sync, Theme, APK) */}
+          <div className="flex sm:hidden items-center justify-between gap-1 w-full pt-1 border-t border-[#DCE4E1]/60 dark:border-[#1E302B]/60">
+            {/* Clock without seconds on mobile */}
+            <div className="flex items-center gap-1 px-2 py-1 rounded-full bg-[#F0F4F2] dark:bg-[#162420] border border-[#DCE4E1] dark:border-[#1E322C] text-[11px] font-mono font-semibold text-[#17211F] dark:text-teal-300 min-h-[40px] shrink-0">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#007F73] animate-pulse shrink-0" />
+              <span>{currentTime.noSec}</span>
             </div>
 
-            {/* Language Switcher Pill */}
-            <div className="flex items-center p-0.5 rounded-xl bg-[#F0F4F2] dark:bg-[#162420] border border-[#DCE4E1] dark:border-[#1E322C] text-xs font-bold">
+            {/* Language Switcher */}
+            <div className="flex items-center p-0.5 rounded-xl bg-[#F0F4F2] dark:bg-[#162420] border border-[#DCE4E1] dark:border-[#1E322C] text-xs font-bold min-h-[40px]">
               <button
                 onClick={handleToggleLanguage}
-                className={`px-2.5 py-1 rounded-lg transition ${
+                className={`min-w-[36px] min-h-[36px] px-2 py-1 rounded-lg transition ${
                   lang === 'bn'
                     ? 'bg-[#007F73] text-white shadow-xs'
-                    : 'text-[#626E6A] dark:text-stone-400 hover:text-[#17211F]'
+                    : 'text-[#626E6A] dark:text-stone-400'
                 }`}
               >
                 বাংলা
               </button>
               <button
                 onClick={handleToggleLanguage}
-                className={`px-2.5 py-1 rounded-lg transition ${
+                className={`min-w-[32px] min-h-[36px] px-2 py-1 rounded-lg transition ${
                   lang === 'en'
                     ? 'bg-[#007F73] text-white shadow-xs'
-                    : 'text-[#626E6A] dark:text-stone-400 hover:text-[#17211F]'
+                    : 'text-[#626E6A] dark:text-stone-400'
                 }`}
               >
                 EN
               </button>
             </div>
 
-            {/* Drive Sync Button */}
+            {/* Drive Sync (Icon Only on Mobile, 40x40 target) */}
             <button
               onClick={() => StorageService.downloadGoogleDriveBackupFile()}
-              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#F0F4F2] dark:bg-[#162420] hover:bg-[#E4ECE9] dark:hover:bg-[#1E322C] border border-[#DCE4E1] dark:border-[#1E322C] text-xs font-semibold text-[#17211F] dark:text-stone-300 transition"
-              title="Download structured backup for Google Drive"
+              className="w-10 h-10 flex items-center justify-center rounded-xl bg-[#F0F4F2] dark:bg-[#162420] border border-[#DCE4E1] dark:border-[#1E322C] text-[#007F73] dark:text-teal-400 hover:bg-[#E4ECE9] dark:hover:bg-[#1E322C] transition shrink-0"
+              title="Drive Sync"
+              aria-label="Drive Sync"
             >
-              <Cloud className="w-3.5 h-3.5 text-[#007F73]" />
-              <span>Drive Sync</span>
+              <Cloud className="w-4 h-4" />
             </button>
 
-            {/* APK Button (Hidden when running as native Android app) */}
+            {/* Theme Toggle (40x40 target) */}
+            <button
+              onClick={() => setIsDark(!isDark)}
+              className="w-10 h-10 flex items-center justify-center rounded-xl text-[#626E6A] dark:text-stone-400 hover:bg-[#F0F4F2] dark:hover:bg-[#162420] transition shrink-0"
+              title="Toggle Light / Dark Eye Comfort Mode"
+              aria-label="Toggle theme"
+            >
+              {isDark ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-[#17211F]" />}
+            </button>
+
+            {/* APK Button (Web only, 40x40 target) */}
             {!isNative && (
               <button
                 onClick={() => {
@@ -658,78 +950,23 @@ export default function App() {
                     setActiveTab('widget');
                   }
                 }}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#007F73] hover:bg-[#00685E] text-white text-xs font-bold transition shadow-xs"
+                className="min-w-[40px] h-10 px-2 flex items-center justify-center rounded-xl bg-[#007F73] hover:bg-[#00685E] text-white text-xs font-bold transition shadow-xs shrink-0"
                 title="Install or Export APK"
+                aria-label="Install APK"
               >
                 <Smartphone className="w-3.5 h-3.5" />
-                <span>APK</span>
               </button>
             )}
-
-            {/* Theme Toggle Button */}
-            <button
-              onClick={() => setIsDark(!isDark)}
-              className="p-2 rounded-xl text-[#626E6A] dark:text-stone-400 hover:bg-[#F0F4F2] dark:hover:bg-[#162420] transition"
-              title="Toggle Light / Dark Eye Comfort Mode"
-            >
-              {isDark ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-[#17211F]" />}
-            </button>
-
-            {/* Profile Dropdown */}
-            <div className="relative">
-              <button
-                onClick={() => setShowUserDropdown(!showUserDropdown)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#F0F4F2] dark:bg-[#162420] border border-[#DCE4E1] dark:border-[#1E322C] text-xs font-bold text-[#17211F] dark:text-stone-200 hover:border-[#007F73] transition"
-              >
-                <Crown className="w-3.5 h-3.5 text-amber-500" />
-                <span className="max-w-[70px] truncate">{currentUser?.name || 'Admin'}</span>
-                <ChevronDown className="w-3 h-3 text-[#626E6A] dark:text-stone-400" />
-              </button>
-
-              {showUserDropdown && (
-                <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-[#162420] rounded-2xl shadow-xl border border-[#DCE4E1] dark:border-[#1E322C] p-1.5 z-50 text-xs">
-                  <button
-                    onClick={() => {
-                      setShowMultiShopModal(true);
-                      setShowUserDropdown(false);
-                    }}
-                    className="w-full text-left px-3 py-2 rounded-xl hover:bg-[#F0F4F2] dark:hover:bg-white/5 flex items-center gap-2 font-semibold text-[#17211F] dark:text-stone-300"
-                  >
-                    <Store className="w-4 h-4 text-[#007F73]" />
-                    <span>{lang === 'bn' ? 'দোকান পরিবর্তন / যোগ' : 'Switch / Add Shop'}</span>
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      setShowSettingsModal(true);
-                      setShowUserDropdown(false);
-                    }}
-                    className="w-full text-left px-3 py-2 rounded-xl hover:bg-[#F0F4F2] dark:hover:bg-white/5 flex items-center gap-2 font-semibold text-[#17211F] dark:text-stone-300"
-                  >
-                    <Settings className="w-4 h-4 text-[#626E6A]" />
-                    <span>{t.settings}</span>
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      handleLogout();
-                      setShowUserDropdown(false);
-                    }}
-                    className="w-full text-left px-3 py-2 rounded-xl hover:bg-rose-50 dark:hover:bg-rose-950/30 flex items-center gap-2 font-semibold text-rose-600"
-                  >
-                    <LogOut className="w-4 h-4" />
-                    <span>{t.switchAccount}</span>
-                  </button>
-                </div>
-              )}
-            </div>
           </div>
         </div>
       </header>
 
-      {/* SUBCLASS NAVIGATION PILL BAR (Exact from Screenshot) */}
-      <div className="max-w-7xl mx-auto px-4 pt-4">
-        <div className="flex items-center gap-1.5 p-1 bg-[#F0F4F2] dark:bg-[#14201C] border border-[#DCE4E1] dark:border-[#1E302B] rounded-2xl overflow-x-auto shadow-2xs">
+      {/* SUBCLASS NAVIGATION PILL BAR: shrink-0, smooth scroll snap, keeps active tab in view */}
+      <div className="shrink-0 z-20 w-full max-w-7xl mx-auto px-2 sm:px-4 pt-2 sm:pt-3">
+        <div
+          ref={tabContainerRef}
+          className="flex items-center gap-1.5 p-1 bg-[#F0F4F2] dark:bg-[#14201C] border border-[#DCE4E1] dark:border-[#1E302B] rounded-2xl overflow-x-auto no-scrollbar scroll-smooth snap-x snap-mandatory shadow-2xs"
+        >
           {[
             { id: 'overview', label: lang === 'bn' ? 'সারসংক্ষেপ ও বিশ্লেষণ' : 'Overview & Analytics', icon: BarChart3 },
             { id: 'stock', label: lang === 'bn' ? 'আজকের মিষ্টির স্টক' : "Add Today's Sweets Stocks", icon: Layers },
@@ -742,14 +979,15 @@ export default function App() {
             return (
               <button
                 key={tab.id}
+                ref={active ? activeTabButtonRef : null}
                 onClick={() => setActiveTab(tab.id as any)}
-                className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition whitespace-nowrap ${
+                className={`snap-center shrink-0 min-h-[40px] px-3.5 sm:px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition whitespace-nowrap ${
                   active
                     ? 'bg-[#007F73] text-white shadow-xs'
                     : 'text-[#626E6A] dark:text-stone-300 hover:text-[#17211F] dark:hover:text-white hover:bg-white/70 dark:hover:bg-white/5'
                 }`}
               >
-                <Icon className="w-4 h-4" />
+                <Icon className="w-4 h-4 shrink-0" />
                 <span>{tab.label}</span>
               </button>
             );
@@ -757,8 +995,10 @@ export default function App() {
         </div>
       </div>
 
-      {/* MAIN CONTENT AREA */}
-      <main className={`max-w-7xl mx-auto px-4 py-5 space-y-6 ${isSwitchingShop ? 'animate-shop-switch' : ''}`}>
+      {/* MAIN CONTENT AREA: flex-1 min-h-0 overflow-y-auto overscroll-contain */}
+      <main
+        className={`flex-1 min-h-0 overflow-y-auto overscroll-contain w-full max-w-7xl mx-auto px-2 sm:px-4 py-3 sm:py-5 space-y-4 sm:space-y-6 pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))] ${isSwitchingShop ? 'animate-shop-switch' : ''}`}
+      >
         {/* Data Safety & Backup Reminder Banner (One-time dismissible) */}
         {showBackupReminder && (
           <div className="p-3.5 sm:p-4 rounded-2xl bg-teal-50 dark:bg-[#101A17] border border-[#007F73]/30 flex flex-wrap items-center justify-between gap-3 text-xs shadow-xs">
@@ -805,19 +1045,41 @@ export default function App() {
         {/* OVERVIEW TAB (Matching the reference screenshot card and metric grid) */}
         {activeTab === 'overview' && (
           <div className="space-y-6">
+            {shops.length === 0 ? (
+              <div className={`p-8 sm:p-12 text-center rounded-3xl border transition-all ${cardSurface} space-y-4`}>
+                <Store className="w-12 h-12 text-[#007F73]/50 mx-auto" />
+                <h3 className="text-lg font-bold text-[#17211F] dark:text-stone-100">
+                  {lang === 'bn' ? 'এখনো কোনো দোকান ব্রাঞ্চ যোগ করা হয়নি' : 'No sweet shops registered yet'}
+                </h3>
+                <p className="text-xs text-[#626E6A] dark:text-stone-400 max-w-sm mx-auto">
+                  {lang === 'bn'
+                    ? 'আপনার মিষ্টির দোকানের স্টক এবং দৈনিক বিক্রির হিসাব শুরু করতে প্রথম দোকান ব্রাঞ্চ নিবন্ধন করুন।'
+                    : 'Register your first sweet shop branch to begin tracking stock, sales, and accounts.'}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setShowMultiShopModal(true)}
+                  className="px-5 py-2.5 bg-[#007F73] hover:bg-[#00685E] text-white rounded-xl font-bold text-xs inline-flex items-center gap-2"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>{lang === 'bn' ? 'দোকান তৈরি করুন' : 'Create Shop'}</span>
+                </button>
+              </div>
+            ) : (
+              <>
             {/* HERO CURRENT SHOP CARD */}
             <div className={`p-6 rounded-3xl border transition-all ${cardSurface}`}>
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-[#DCE4E1] dark:border-[#1E302B]">
                 <div>
                   <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#007F73]/10 border border-[#007F73]/25 text-[#007F73] dark:text-teal-300 text-xs font-semibold mb-2">
                     <Sparkles className="w-3.5 h-3.5" />
-                    <span>Muslim Sweets Management</span>
+                    <span>{lang === 'bn' ? 'মিষ্টির দোকান ব্যবস্থাপনা' : 'Sweet Shop Management'}</span>
                   </div>
 
                   {/* Main Shop Name */}
                   <div className="flex items-center gap-2">
                     <h2 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-[#17211F] dark:text-white">
-                      {activeShop ? (lang === 'bn' ? activeShop.nameBn || activeShop.name : activeShop.name) : 'Maniknagar Muslim Sweets'}
+                      {activeShop ? (lang === 'bn' ? activeShop.nameBn || activeShop.name : activeShop.name) : (lang === 'bn' ? 'আপনার দোকান' : 'Your Shop')}
                     </h2>
                     <button
                       type="button"
@@ -840,7 +1102,7 @@ export default function App() {
                   {/* User Info Line */}
                   <p className="text-xs text-[#626E6A] dark:text-stone-400 mt-1 flex items-center gap-2">
                     <span>
-                      User: <strong className="text-[#17211F] dark:text-stone-200">{currentUser?.name || 'Akash'}</strong>
+                      User: <strong className="text-[#17211F] dark:text-stone-200">{currentUser?.name || (lang === 'bn' ? 'ব্যবহারকারী' : 'User')}</strong>
                     </span>
                     <span>·</span>
                     <span>
@@ -924,7 +1186,7 @@ export default function App() {
               </div>
 
               {/* 4 STAT METRIC CARDS (Exact match to reference image) */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-6">
+              <div className="grid grid-cols-1 min-[480px]:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mt-4 sm:mt-6">
                 {/* 1. Today's Sales */}
                 <div className="p-4 rounded-2xl bg-[#F0F4F2] dark:bg-[#101A17] border border-[#DCE4E1] dark:border-[#1B2C27] flex flex-col justify-between">
                   <div className="flex items-center justify-between text-xs text-[#626E6A] dark:text-stone-400 font-medium">
@@ -1001,7 +1263,7 @@ export default function App() {
             </div>
 
             {/* 3 QUICK-ACTION CARDS AT BOTTOM OF OVERVIEW (Directly from reference) */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 min-[480px]:grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4">
               {/* Card 1: Add Today's Sweets Stocks */}
               <div
                 onClick={() => setActiveTab('stock')}
@@ -1074,6 +1336,8 @@ export default function App() {
                 lang={lang}
               />
             </div>
+              </>
+            )}
           </div>
         )}
 
@@ -1159,6 +1423,27 @@ export default function App() {
           </button>
         </div>
       )}
+
+      {/* Logout Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={showLogoutConfirm}
+        title={lang === 'bn' ? 'লগ আউট' : 'Log out'}
+        message={
+          currentUser
+            ? lang === 'bn'
+              ? `${currentUser.name} একাউন্ট থেকে লগ আউট করতে চান? পুনরায় প্রবেশ করতে পাসওয়ার্ডের প্রয়োজন হবে।`
+              : `Log out of ${currentUser.name}? You will need your password to sign in again.`
+            : lang === 'bn'
+            ? 'আপনি কি লগ আউট করতে চান?'
+            : 'Are you sure you want to log out?'
+        }
+        isDanger={true}
+        confirmText={lang === 'bn' ? 'লগ আউট' : 'Log out'}
+        cancelText={lang === 'bn' ? 'বাতিল' : 'Cancel'}
+        onConfirm={performLogout}
+        onCancel={() => setShowLogoutConfirm(false)}
+        lang={lang}
+      />
     </div>
   );
 }

@@ -5,6 +5,7 @@
 import React, { useState, useMemo } from 'react';
 import { ShopBranch, UserAccount } from '../types';
 import { StorageService } from '../services/storage';
+import { ConfirmDialog } from './ConfirmDialog';
 import { Store, Plus, Check, MapPin, Layers, Edit2, Trash2, X, TrendingUp, Search } from 'lucide-react';
 
 interface MultiShopModalProps {
@@ -40,6 +41,9 @@ export const MultiShopModal: React.FC<MultiShopModalProps> = ({
   const [editNameBn, setEditNameBn] = useState('');
   const [editAddress, setEditAddress] = useState('');
 
+  // Delete Shop State
+  const [shopToDelete, setShopToDelete] = useState<ShopBranch | null>(null);
+
   // Search and Chain summary
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -72,39 +76,6 @@ export const MultiShopModal: React.FC<MultiShopModalProps> = ({
       (s.address && s.address.toLowerCase().includes(q))
     );
   }, [shops, searchQuery]);
-
-  // Quick 1-tap demo branch creator for fast testing
-  const handleAddDemoBranch = () => {
-    if (isReadOnly) return;
-    const branchNames = [
-      { name: 'Dhanmondi Muslim Sweets Branch', nameBn: 'ধানমন্ডি মুসলিম সুইটস ব্রাঞ্চ', address: 'Road 27, Dhanmondi, Dhaka' },
-      { name: 'Uttara Confectionery & Sweets', nameBn: 'উত্তরা কনফেকশনারি ও সুইটস ব্রাঞ্চ', address: 'Sector 4, Uttara, Dhaka' },
-      { name: 'Mirpur Muslim Sweets & Bakery', nameBn: 'মিরপুর মুসলিম সুইটস ও বেকারি', address: 'Mirpur-10 Circle, Dhaka' },
-    ];
-    const available = branchNames.find(bn => !shops.some(s => s.name === bn.name)) || {
-      name: `Muslim Sweets Branch #${shops.length + 1}`,
-      nameBn: `মুসলিম সুইটস ব্রাঞ্চ #${shops.length + 1}`,
-      address: 'Dhaka, Bangladesh',
-    };
-
-    const newBranch: ShopBranch = {
-      id: crypto.randomUUID(),
-      name: available.name,
-      nameBn: available.nameBn,
-      address: available.address,
-      country: 'BD',
-      currencySymbol: '৳',
-      createdAt: new Date().toISOString(),
-    };
-    StorageService.saveShop(newBranch);
-
-    // Populate with authentic Bengali sweets for the demo branch
-    StorageService.loadAuthenticBengaliDemoData(newBranch.id);
-
-    StorageService.setActiveShopId(newBranch.id);
-    onSelectShop(newBranch.id);
-    onRefresh();
-  };
 
   // 1. Create New Shop Branch
   const handleCreateShop = (e: React.FormEvent) => {
@@ -146,13 +117,9 @@ export const MultiShopModal: React.FC<MultiShopModalProps> = ({
   };
 
   // 3. Delete Shop Branch (if multiple exist)
-  const handleDeleteShop = (shopId: string) => {
-    if (isReadOnly || shops.length <= 1) return;
-    const confirmMsg = lang === 'bn' 
-      ? 'আপনি কি নিশ্চিতভাবে এই দোকান ব্রাঞ্চটি মুছে ফেলতে চান?' 
-      : 'Are you sure you want to delete this shop branch?';
-    if (!window.confirm(confirmMsg)) return;
-
+  const executeDeleteShop = () => {
+    if (!shopToDelete || isReadOnly || shops.length <= 1) return;
+    const shopId = shopToDelete.id;
     StorageService.deleteShop(shopId);
 
     const remaining = shops.filter(s => s.id !== shopId);
@@ -160,12 +127,13 @@ export const MultiShopModal: React.FC<MultiShopModalProps> = ({
       StorageService.setActiveShopId(remaining[0].id);
       onSelectShop(remaining[0].id);
     }
+    setShopToDelete(null);
     onRefresh();
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs overflow-y-auto">
-      <div className="w-full max-w-lg bg-white dark:bg-[#14201C] rounded-3xl shadow-2xl border border-[#DCE4E1] dark:border-[#1E302B] text-[#17211F] dark:text-stone-100 overflow-hidden my-auto">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/60 backdrop-blur-xs overflow-y-auto">
+      <div className="w-[min(100vw-1rem,32rem)] max-h-[85dvh] bg-white dark:bg-[#14201C] rounded-3xl shadow-2xl border border-[#DCE4E1] dark:border-[#1E302B] text-[#17211F] dark:text-stone-100 overflow-hidden my-auto flex flex-col">
         {/* Header */}
         <div className="p-5 bg-gradient-to-r from-stone-900 to-stone-850 dark:from-[#0E1513] dark:to-[#14201C] text-white flex items-center justify-between border-b border-[#DCE4E1]/30 dark:border-[#1E302B]">
           <div className="flex items-center gap-2.5">
@@ -210,23 +178,12 @@ export const MultiShopModal: React.FC<MultiShopModalProps> = ({
                   <span className="font-mono text-teal-300 text-xs font-semibold">
                     {chainStats.totalStockAll} {lang === 'bn' ? 'কেজি স্টক' : 'kg stock'}
                   </span>
-                  <span className="text-stone-600">·</span>
                   <span className="font-mono text-amber-300 text-xs font-semibold">
                     ৳ {chainStats.totalSalesAll.toLocaleString()} {lang === 'bn' ? 'বিক্রি' : 'sales'}
                   </span>
                 </div>
               </div>
             </div>
-            {shops.length <= 2 && !isReadOnly && (
-              <button
-                type="button"
-                onClick={handleAddDemoBranch}
-                className="px-2.5 py-1.5 rounded-xl bg-[#007F73] hover:bg-[#00685E] text-white font-bold text-[11px] shrink-0 transition shadow-xs"
-                title="Quickly add Dhanmondi or Uttara branch to test instant switching"
-              >
-                + {lang === 'bn' ? 'ডেমো ব্রাঞ্চ' : 'Add 2nd Branch'}
-              </button>
-            )}
           </div>
 
           {/* Quick Search across shops if more than 2 */}
@@ -279,7 +236,7 @@ export const MultiShopModal: React.FC<MultiShopModalProps> = ({
                   required
                   value={nameEn}
                   onChange={e => setNameEn(e.target.value)}
-                  placeholder="e.g. Muslim Sweets (Maniknagar Branch)"
+                  placeholder={lang === 'bn' ? 'যেমন: আমার মিষ্টির দোকান' : 'e.g. My Sweet Shop'}
                   className="w-full px-3 py-2 bg-white dark:bg-[#14201C] border border-[#DCE4E1] dark:border-[#1E302B] rounded-xl outline-none focus:ring-2 focus:ring-[#007F73]/20 focus:border-[#007F73] text-[#17211F] dark:text-stone-100 font-medium placeholder-[#626E6A]"
                 />
                 <p className="text-[10px] text-[#626E6A] dark:text-stone-400 mt-0.5">
@@ -295,7 +252,7 @@ export const MultiShopModal: React.FC<MultiShopModalProps> = ({
                   type="text"
                   value={nameBn}
                   onChange={e => setNameBn(e.target.value)}
-                  placeholder="যেমন: মুসলিম সুইটস (মানিকনগর শাখা)"
+                  placeholder="যেমন: আমার মিষ্টির দোকান"
                   className="w-full px-3 py-2 bg-white dark:bg-[#14201C] border border-[#DCE4E1] dark:border-[#1E302B] rounded-xl outline-none focus:ring-2 focus:ring-[#007F73]/20 focus:border-[#007F73] text-[#17211F] dark:text-stone-100 placeholder-[#626E6A]"
                 />
               </div>
@@ -308,11 +265,11 @@ export const MultiShopModal: React.FC<MultiShopModalProps> = ({
                   type="text"
                   value={address}
                   onChange={e => setAddress(e.target.value)}
-                  placeholder="e.g. Road 27, Maniknagar Bazar, Dhaka-1203"
+                  placeholder={lang === 'bn' ? 'যেমন: রাস্তা, এলাকা, শহর' : 'e.g. Street, Area, City'}
                   className="w-full px-3 py-2 bg-white dark:bg-[#14201C] border border-[#DCE4E1] dark:border-[#1E302B] rounded-xl outline-none focus:ring-2 focus:ring-[#007F73]/20 focus:border-[#007F73] text-[#17211F] dark:text-stone-100 placeholder-[#626E6A]"
                 />
                 <p className="text-[10px] text-[#626E6A] dark:text-stone-400 mt-0.5">
-                  {lang === 'bn' ? 'এলাকা বা পোস্টাল কোড (যেমন: Dhaka-1203)' : 'Postal code or road details.'}
+                  {lang === 'bn' ? 'রাস্তা, এলাকা বা শহর' : 'Street, road or city details.'}
                 </p>
               </div>
 
@@ -359,7 +316,7 @@ export const MultiShopModal: React.FC<MultiShopModalProps> = ({
                   required
                   value={editNameEn}
                   onChange={e => setEditNameEn(e.target.value)}
-                  placeholder="e.g. Muslim Sweets (Maniknagar Branch)"
+                  placeholder={lang === 'bn' ? 'যেমন: আমার মিষ্টির দোকান' : 'e.g. My Sweet Shop'}
                   className="w-full px-3 py-2 bg-white dark:bg-[#14201C] border border-[#DCE4E1] dark:border-[#1E302B] rounded-xl outline-none focus:ring-2 focus:ring-[#007F73]/20 focus:border-[#007F73] text-[#17211F] dark:text-stone-100 font-bold"
                 />
               </div>
@@ -372,7 +329,7 @@ export const MultiShopModal: React.FC<MultiShopModalProps> = ({
                   type="text"
                   value={editNameBn}
                   onChange={e => setEditNameBn(e.target.value)}
-                  placeholder="যেমন: মানিকনগর মুসলিম সুইটস"
+                  placeholder="যেমন: আমার মিষ্টির দোকান"
                   className="w-full px-3 py-2 bg-white dark:bg-[#14201C] border border-[#DCE4E1] dark:border-[#1E302B] rounded-xl outline-none focus:ring-2 focus:ring-[#007F73]/20 focus:border-[#007F73] text-[#17211F] dark:text-stone-100"
                 />
               </div>
@@ -385,7 +342,7 @@ export const MultiShopModal: React.FC<MultiShopModalProps> = ({
                   type="text"
                   value={editAddress}
                   onChange={e => setEditAddress(e.target.value)}
-                  placeholder="e.g. Dhaka-1203"
+                  placeholder={lang === 'bn' ? 'যেমন: রাস্তা, এলাকা, শহর' : 'e.g. Street, Area, City'}
                   className="w-full px-3 py-2 bg-white dark:bg-[#14201C] border border-[#DCE4E1] dark:border-[#1E302B] rounded-xl outline-none focus:ring-2 focus:ring-[#007F73]/20 focus:border-[#007F73] text-[#17211F] dark:text-stone-100"
                 />
               </div>
@@ -511,7 +468,7 @@ export const MultiShopModal: React.FC<MultiShopModalProps> = ({
                           type="button"
                           onClick={e => {
                             e.stopPropagation();
-                            handleDeleteShop(shop.id);
+                            setShopToDelete(shop);
                           }}
                           title="Delete branch"
                           className="p-2 text-[#626E6A] dark:text-stone-400 hover:text-[#DC2626] dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-xl transition"
@@ -544,6 +501,23 @@ export const MultiShopModal: React.FC<MultiShopModalProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Delete Shop Branch Confirm Dialog */}
+      <ConfirmDialog
+        isOpen={!!shopToDelete}
+        title={lang === 'bn' ? 'দোকান ব্রাঞ্চ মুছে ফেলুন' : 'Delete Shop Branch'}
+        message={
+          lang === 'bn'
+            ? `আপনি কি নিশ্চিতভাবে "${shopToDelete?.nameBn || shopToDelete?.name}" ব্রাঞ্চটি মুছে ফেলতে চান?`
+            : `Are you sure you want to delete "${shopToDelete?.name}"?`
+        }
+        isDanger={true}
+        confirmText={lang === 'bn' ? 'মুছে ফেলুন' : 'Delete'}
+        cancelText={lang === 'bn' ? 'বাতিল' : 'Cancel'}
+        onConfirm={executeDeleteShop}
+        onCancel={() => setShopToDelete(null)}
+        lang={lang}
+      />
     </div>
   );
 };

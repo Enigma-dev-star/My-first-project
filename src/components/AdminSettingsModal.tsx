@@ -5,7 +5,13 @@
 
 import React, { useState, useEffect } from 'react';
 import { UserAccount, AppSettings } from '../types';
-import { StorageService, hashString } from '../services/storage';
+import {
+  StorageService,
+  hashPassword,
+  verifyPassword,
+  decryptBackupPayload,
+} from '../services/storage';
+import { ConfirmDialog } from './ConfirmDialog';
 import { TRANSLATIONS, COUNTRIES } from '../locales/i18n';
 import {
   Settings,
@@ -23,6 +29,8 @@ import {
   FileCode,
   X,
   Check,
+  LogOut,
+  Lock,
 } from 'lucide-react';
 
 interface SettingsModalProps {
@@ -33,6 +41,7 @@ interface SettingsModalProps {
   onClose: () => void;
   onSettingsChange: (settings: AppSettings) => void;
   onRefresh: () => void;
+  onLogout: () => void;
 }
 
 export const AdminSettingsModal: React.FC<SettingsModalProps> = ({
@@ -43,6 +52,7 @@ export const AdminSettingsModal: React.FC<SettingsModalProps> = ({
   onClose,
   onSettingsChange,
   onRefresh,
+  onLogout,
 }) => {
   const t = TRANSLATIONS[lang];
   const isMaster = currentUser?.role === 'master_admin';
@@ -60,6 +70,21 @@ export const AdminSettingsModal: React.FC<SettingsModalProps> = ({
   const [showEraseStockModal, setShowEraseStockModal] = useState(false);
   const [eraseStockPwdInput, setEraseStockPwdInput] = useState('');
   const [eraseStockError, setEraseStockError] = useState<string | null>(null);
+
+  // Sample Data Confirmation States
+  const [showDemoConfirm, setShowDemoConfirm] = useState(false);
+  const [showRemoveDemoConfirm, setShowRemoveDemoConfirm] = useState(false);
+
+  // Backup Export Passphrase State
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportPassphrase, setExportPassphrase] = useState('');
+  const [exportError, setExportError] = useState<string | null>(null);
+
+  // Backup Restore Passphrase State
+  const [pendingRestoreContent, setPendingRestoreContent] = useState<string | null>(null);
+  const [showRestorePassphraseModal, setShowRestorePassphraseModal] = useState(false);
+  const [restorePassphrase, setRestorePassphrase] = useState('');
+  const [restoreError, setRestoreError] = useState<string | null>(null);
 
   // 20-Second Android Safety Buffer Reset State
   const [showResetBufferModal, setShowResetBufferModal] = useState(false);
@@ -244,8 +269,8 @@ export const AdminSettingsModal: React.FC<SettingsModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-sm overflow-y-auto">
-      <div className="w-full max-w-xl bg-white dark:bg-[#14201C] rounded-3xl shadow-2xl border border-[#DCE4E1] dark:border-[#1E302B] overflow-hidden my-auto max-h-[90vh] flex flex-col">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/60 backdrop-blur-sm overflow-y-auto">
+      <div className="w-[min(100vw-1rem,36rem)] bg-white dark:bg-[#14201C] rounded-3xl shadow-2xl border border-[#DCE4E1] dark:border-[#1E302B] overflow-hidden my-auto max-h-[85dvh] flex flex-col">
         {/* Modal Header */}
         <div className="p-4 bg-[#0E1513] text-white flex items-center justify-between border-b border-[#1E302B]">
           <div className="flex items-center gap-2.5">
@@ -411,6 +436,56 @@ export const AdminSettingsModal: React.FC<SettingsModalProps> = ({
                       </button>
                     );
                   })}
+                </div>
+              </div>
+
+              {/* Login Session Persistence Setting */}
+              <div>
+                <label className="block text-xs font-bold text-[#17211F] dark:text-stone-100 mb-1">
+                  {lang === 'bn' ? 'লগইন সেশন' : 'Login session'}
+                </label>
+                <p className="text-[10px] text-[#626E6A] dark:text-stone-400 mb-2">
+                  {lang === 'bn'
+                    ? 'অ্যাপ বন্ধ করে পুনরায় খোলার সময় সরাসরি লগইন থাকবে নাকি প্রতিবার পাসওয়ার্ড চাইবে তা নির্ধারণ করুন।'
+                    : 'Choose whether to stay logged in across app restarts or require password each time you open the app.'}
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const updated: AppSettings = { ...settings, sessionPersistence: 'keep_logged_in' };
+                      StorageService.saveSettings(updated);
+                      onSettingsChange(updated);
+                      showToast(lang === 'bn' ? 'লগইন ধরে রাখা হবে (ডিফল্ট)' : 'Session: Keep me logged in (default)');
+                    }}
+                    className={`p-3 rounded-2xl border text-left transition ${
+                      (!settings.sessionPersistence || settings.sessionPersistence === 'keep_logged_in')
+                        ? 'bg-[#007F73]/10 dark:bg-[#007F73]/20 border-[#007F73] text-[#007F73] dark:text-teal-300 font-bold shadow-sm ring-1 ring-[#007F73]/30'
+                        : 'bg-[#F0F4F2] dark:bg-[#101A17] hover:bg-[#E5ECE9] dark:hover:bg-[#182622] border-[#DCE4E1] dark:border-[#1E302B] text-[#17211F] dark:text-stone-300'
+                    }`}
+                  >
+                    <div className="text-xs">
+                      {lang === 'bn' ? 'লগইন ধরে রাখুন (ডিফল্ট)' : 'Keep me logged in (default)'}
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const updated: AppSettings = { ...settings, sessionPersistence: 'ask_every_time' };
+                      StorageService.saveSettings(updated);
+                      onSettingsChange(updated);
+                      showToast(lang === 'bn' ? 'প্রতিবার অ্যাপ খুললে পাসওয়ার্ড চাওয়া হবে' : 'Session: Ask for login every time');
+                    }}
+                    className={`p-3 rounded-2xl border text-left transition ${
+                      settings.sessionPersistence === 'ask_every_time'
+                        ? 'bg-[#007F73]/10 dark:bg-[#007F73]/20 border-[#007F73] text-[#007F73] dark:text-teal-300 font-bold shadow-sm ring-1 ring-[#007F73]/30'
+                        : 'bg-[#F0F4F2] dark:bg-[#101A17] hover:bg-[#E5ECE9] dark:hover:bg-[#182622] border-[#DCE4E1] dark:border-[#1E302B] text-[#17211F] dark:text-stone-300'
+                    }`}
+                  >
+                    <div className="text-xs">
+                      {lang === 'bn' ? 'প্রতিবার অ্যাপ খোলার সময় পাসওয়ার্ড চাইবে' : 'Ask for login every time I open the app'}
+                    </div>
+                  </button>
                 </div>
               </div>
             </div>
@@ -656,21 +731,30 @@ export const AdminSettingsModal: React.FC<SettingsModalProps> = ({
               {/* 1-Click Load Bengali Demo Data (for testing) */}
               <div className="p-3.5 rounded-2xl bg-[#007F73]/10 dark:bg-[#007F73]/20 border border-[#007F73]/30">
                 <div className="font-bold text-[#17211F] dark:text-stone-100 mb-0.5">
-                  {t.loadDemoData}
+                  {lang === 'bn' ? 'নমুনা ডাটা (Sample data)' : 'Sample data'}
                 </div>
                 <p className="text-[10px] text-[#626E6A] dark:text-stone-300 mb-2.5">
-                  {t.loadDemoDesc}
+                  {lang === 'bn' 
+                    ? 'পরীক্ষামূলক ব্যবহারের জন্য কয়েকটি জনপ্রিয় বাঙালি মিষ্টি ও নমুনা বিক্রি ডাটা লোড করুন।' 
+                    : 'Load sample sweet items and sales figures for testing and evaluation.'}
                 </p>
                 <button
+                  type="button"
                   onClick={() => {
-                    StorageService.loadAuthenticBengaliDemoData(activeShopId);
-                    showToast(lang === 'bn' ? 'বাঙালি মিষ্টি ও বিক্রির নমুনা লোড হয়েছে!' : 'Demo sweets loaded!');
-                    onRefresh();
+                    if (!activeShopId) return;
+                    const confirmMsg = lang === 'bn'
+                      ? 'আপনি কি নিশ্চিত যে এই দোকানে নমুনা মিষ্টি ও বিক্রির ডাটা লোড করতে চান?'
+                      : 'Are you sure you want to load sample sweet shop products and demo sales data for this shop?';
+                    if (window.confirm(confirmMsg)) {
+                      StorageService.loadAuthenticBengaliDemoData(activeShopId);
+                      showToast(lang === 'bn' ? 'বাঙালি মিষ্টি ও বিক্রির নমুনা লোড হয়েছে!' : 'Sample data loaded!');
+                      onRefresh();
+                    }
                   }}
-                  className="px-3 py-1.5 bg-[#007F73] hover:bg-[#006e63] text-white rounded-xl font-bold flex items-center gap-1.5 transition shadow-sm"
+                  className="px-3 py-1.5 bg-[#007F73] hover:bg-[#006e63] text-white rounded-xl font-bold flex items-center gap-1.5 transition shadow-sm text-xs"
                 >
                   <Sparkles className="w-3.5 h-3.5" />
-                  {lang === 'bn' ? 'নমুনা ডাটা লোড করুন' : 'Load Demo Data'}
+                  {lang === 'bn' ? 'নমুনা ডাটা (Sample data)' : 'Sample data'}
                 </button>
               </div>
 
@@ -745,6 +829,21 @@ export const AdminSettingsModal: React.FC<SettingsModalProps> = ({
               </div>
             </div>
           )}
+        </div>
+
+        {/* Modal Footer: Log Out Entry Point */}
+        <div className="p-4 border-t border-[#DCE4E1] dark:border-[#1E302B] bg-[#F0F4F2]/50 dark:bg-[#101A17]/50 rounded-b-3xl">
+          <button
+            type="button"
+            onClick={() => {
+              onClose();
+              onLogout();
+            }}
+            className="w-full py-2.5 px-4 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-950/70 text-rose-700 dark:text-rose-400 border border-rose-200 dark:border-rose-900/50 rounded-2xl font-bold flex items-center justify-center gap-2 transition active:scale-98 text-xs"
+          >
+            <LogOut className="w-4 h-4 text-rose-600 dark:text-rose-400" />
+            <span>{lang === 'bn' ? 'লগ আউট (Log out)' : 'Log out'}</span>
+          </button>
         </div>
       </div>
 

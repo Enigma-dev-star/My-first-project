@@ -66,6 +66,20 @@ export const BillingTab: React.FC<BillingTabProps> = ({
     onRefresh();
   };
 
+  if (!activeShopId) {
+    return (
+      <div className="p-12 text-center bg-white dark:bg-[#14201C] rounded-3xl border border-[#DCE4E1] dark:border-[#1E302B] shadow-xs">
+        <Receipt className="w-10 h-10 mx-auto text-[#626E6A]/50 dark:text-stone-600 mb-3" />
+        <h4 className="text-sm font-bold text-[#17211F] dark:text-stone-100">
+          {lang === 'bn' ? 'দোকান ব্রাঞ্চ নির্বাচন করুন' : 'No shop branch active'}
+        </h4>
+        <p className="text-xs text-[#626E6A] dark:text-stone-400 mt-1 max-w-sm mx-auto">
+          {lang === 'bn' ? 'বিল ও খরচের খাতা দেখতে প্রথমে একটি দোকান তৈরি বা নির্বাচন করুন।' : 'Please create or select a shop branch to view bills and expense records.'}
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       {/* Financial Summary Cards */}
