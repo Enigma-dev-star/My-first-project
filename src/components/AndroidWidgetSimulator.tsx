@@ -80,7 +80,7 @@ class MSMSGlanceWidget : GlanceAppWidget() {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "MSMS • ${shopName || "Muslim Sweets"}",
+                    text = "MSMS • ${shopName || "MSMS"}",
                     style = TextStyle(
                         fontWeight = FontWeight.Bold,
                         fontSize = 14.sp,

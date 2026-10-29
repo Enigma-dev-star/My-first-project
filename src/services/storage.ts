@@ -862,14 +862,17 @@ export class StorageService {
     };
   }
 
-  // Passphrase-encrypted backup export
-  static async downloadGoogleDriveBackupFile(passphrase: string): Promise<{ success: boolean; filePath?: string; error?: string }> {
+  // Passphrase-encrypted backup export (optional passphrase)
+  static async downloadGoogleDriveBackupFile(passphrase?: string): Promise<{ success: boolean; filePath?: string; error?: string }> {
     try {
       const backup = this.generateGoogleDriveBackup();
-      const jsonString = JSON.stringify(backup);
-      const encryptedString = await encryptBackupPayload(jsonString, passphrase);
+      const jsonString = JSON.stringify(backup, null, 2);
+      const isEncrypted = !!(passphrase && passphrase.length >= 8);
+      const payloadString = isEncrypted
+        ? await encryptBackupPayload(jsonString, passphrase!)
+        : jsonString;
       const dateStr = new Date().toISOString().split('T')[0];
-      const fileName = `MSMS_Backup_${dateStr}.msmsbak`;
+      const fileName = isEncrypted ? `MSMS_Backup_${dateStr}.msmsbak` : `MSMS_Backup_${dateStr}.json`;
 
       const nowIso = new Date().toISOString();
       Vault.set(STORAGE_KEYS.LAST_BACKUP, nowIso);
@@ -877,16 +880,16 @@ export class StorageService {
       if (Capacitor.isNativePlatform()) {
         const written = await Filesystem.writeFile({
           path: fileName,
-          data: encryptedString,
+          data: payloadString,
           directory: Directory.Cache,
           encoding: Encoding.UTF8,
         });
 
         await Share.share({
-          title: 'MSMS Store Backup (Encrypted)',
-          text: `Encrypted MSMS Backup generated on ${dateStr}`,
+          title: isEncrypted ? 'MSMS Store Backup (Encrypted)' : 'MSMS Store Backup',
+          text: `MSMS Backup generated on ${dateStr}`,
           url: written.uri,
-          dialogTitle: 'Save or Share Encrypted MSMS Backup',
+          dialogTitle: 'Save or Share MSMS Backup',
         });
 
         // Delete temporary file from cache after sharing
@@ -899,10 +902,12 @@ export class StorageService {
           // ignore cache cleanup error
         }
 
-        this.logAction('BACKUP_EXPORTED_ENCRYPTED', `Shared encrypted backup file ${fileName}`);
+        this.logAction('BACKUP_EXPORTED', `Shared backup file ${fileName}`);
         return { success: true, filePath: written.uri };
       } else {
-        const blob = new Blob([encryptedString], { type: 'application/octet-stream' });
+        const blob = new Blob([payloadString], {
+          type: isEncrypted ? 'application/octet-stream' : 'application/json',
+        });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
@@ -912,13 +917,41 @@ export class StorageService {
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
 
-        this.logAction('BACKUP_DOWNLOADED_ENCRYPTED', `Downloaded encrypted backup file ${fileName}`);
+        this.logAction('BACKUP_DOWNLOADED', `Downloaded backup file ${fileName}`);
         return { success: true };
       }
     } catch (err: any) {
-      console.error('Failed to create encrypted backup', err);
+      console.error('Failed to create backup', err);
       return { success: false, error: err?.message || 'Failed to export backup' };
     }
+  }
+
+  static eraseStock(shopId: string): void {
+    const products = this.getProducts();
+    products.forEach(p => {
+      if (!shopId || p.shopId === shopId) {
+        p.currentStock = 0;
+        p.updatedAt = new Date().toISOString();
+      }
+    });
+    Vault.set(STORAGE_KEYS.PRODUCTS, JSON.stringify(products));
+    this.logAction('STOCK_ERASED', `Stock reset to zero for shop: ${shopId || 'all'}`);
+  }
+
+  static clearTestDataAndSales(): void {
+    this.factoryResetClearTransactions();
+  }
+
+  static addStockEntry(entry: StockEntry): void {
+    this.recordStockEntry(entry);
+  }
+
+  static addSaleRecord(sale: SaleRecord): void {
+    this.recordSale(sale);
+  }
+
+  static addBillRecord(bill: BillRecord): void {
+    this.addBill(bill);
   }
 
   static getLastBackupDate(): string | null {

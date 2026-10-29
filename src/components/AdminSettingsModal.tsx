@@ -171,7 +171,7 @@ export const AdminSettingsModal: React.FC<SettingsModalProps> = ({
     }
 
     try {
-      const pwdHash = await hashString(guestPassword.trim());
+      const pwdHash = await hashPassword(guestPassword.trim());
       const newGuest: UserAccount = {
         id: crypto.randomUUID(),
         name: guestName.trim(),
@@ -195,8 +195,8 @@ export const AdminSettingsModal: React.FC<SettingsModalProps> = ({
     e.preventDefault();
     if (!isMaster || !currentUser?.stockErasePasswordHash) return;
 
-    const inputHash = await hashString(eraseStockPwdInput.trim());
-    if (inputHash !== currentUser.stockErasePasswordHash) {
+    const verifyResult = await verifyPassword(eraseStockPwdInput.trim(), currentUser.stockErasePasswordHash);
+    if (!verifyResult.valid) {
       setEraseStockError(
         lang === 'bn'
           ? 'ভুল স্টক মোছার পাসওয়ার্ড! এটি আপনার লগইন পাসওয়ার্ড নয়।'
@@ -244,19 +244,55 @@ export const AdminSettingsModal: React.FC<SettingsModalProps> = ({
     onRefresh();
   };
 
-  // Backup file upload / restore
+  // Execute Encrypted Backup Export with Passphrase
+  const handleExecuteExport = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (exportPassphrase.length < 8) {
+      setExportError(
+        lang === 'bn'
+          ? 'পাসফ্রেজ অন্তত ৮ অক্ষরের হতে হবে।'
+          : 'Passphrase must be at least 8 characters long.'
+      );
+      return;
+    }
+    setExportError(null);
+    const res = await StorageService.downloadGoogleDriveBackupFile(exportPassphrase);
+    if (res.success) {
+      setShowExportModal(false);
+      setExportPassphrase('');
+      showToast(lang === 'bn' ? 'এনক্রিপ্টেড ব্যাকআপ সংরক্ষিত হয়েছে!' : 'Encrypted backup exported!');
+      onRefresh();
+    } else {
+      setExportError(lang === 'bn' ? 'এক্সপোর্ট ব্যর্থ হয়েছে।' : 'Export failed.');
+    }
+  };
+
+  // Backup file upload / restore (Supports .msmsbak, .json, .txt)
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = ev => {
+    reader.onload = async ev => {
       try {
-        const content = ev.target?.result as string;
+        const content = ((ev.target?.result as string) || '').trim();
+        // Check if encrypted backup
+        if (content.startsWith('MSMS-BACKUP:') || (content.includes('"version":1') && content.includes('"ciphertext"'))) {
+          setPendingRestoreContent(content);
+          setShowRestorePassphraseModal(true);
+          setRestorePassphrase('');
+          setRestoreError(null);
+          return;
+        }
+
         const parsed = JSON.parse(content);
         const success = StorageService.restoreFromBackup(parsed);
         if (success) {
-          showToast(lang === 'bn' ? 'ব্যাকআপ সফলভাবে রিস্টোর হয়েছে!' : 'Backup successfully restored!');
+          showToast(
+            lang === 'bn'
+              ? 'অসংকেতায়িত পুরাতন ব্যাকআপ সফলভাবে রিস্টোর হয়েছে!'
+              : 'Legacy unencrypted backup successfully restored!'
+          );
           onRefresh();
         } else {
           showToast(lang === 'bn' ? 'ফাইল ফরম্যাট সঠিক নয়।' : 'Invalid backup file.');
@@ -266,6 +302,43 @@ export const AdminSettingsModal: React.FC<SettingsModalProps> = ({
       }
     };
     reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  // Execute Decryption and Restore of Encrypted Backup
+  const handleExecuteRestoreEncrypted = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!pendingRestoreContent || !restorePassphrase) return;
+    setRestoreError(null);
+
+    try {
+      const res = await decryptBackupPayload(pendingRestoreContent, restorePassphrase);
+      if (res.success && res.data) {
+        const success = StorageService.restoreFromBackup(res.data);
+        if (success) {
+          setShowRestorePassphraseModal(false);
+          setPendingRestoreContent(null);
+          setRestorePassphrase('');
+          showToast(lang === 'bn' ? 'এনক্রিপ্টেড ব্যাকআপ সফলভাবে রিস্টোর হয়েছে!' : 'Encrypted backup restored successfully!');
+          onRefresh();
+        } else {
+          setRestoreError(lang === 'bn' ? 'ডাটা রিস্টোর করতে ব্যর্থ হয়েছে।' : 'Failed to restore backup data.');
+        }
+      } else {
+        setRestoreError(
+          res.error ||
+          (lang === 'bn'
+            ? 'ভুল পাসফ্রেজ! ব্যাকআপ ডিক্রিপ্ট করা সম্ভব হয়নি।'
+            : 'Incorrect passphrase! Could not decrypt backup.')
+        );
+      }
+    } catch {
+      setRestoreError(
+        lang === 'bn'
+          ? 'ভুল পাসফ্রেজ! ব্যাকআপ ডিক্রিপ্ট করা সম্ভব হয়নি।'
+          : 'Incorrect passphrase! Could not decrypt backup.'
+      );
+    }
   };
 
   return (
@@ -656,12 +729,10 @@ export const AdminSettingsModal: React.FC<SettingsModalProps> = ({
 
               <div className="p-4 rounded-2xl bg-[#F0F4F2] dark:bg-[#101A17] border border-[#DCE4E1] dark:border-[#1E302B] space-y-3">
                 <button
-                  onClick={async () => {
-                    const res = await StorageService.downloadGoogleDriveBackupFile();
-                    if (res.success) {
-                      showToast(lang === 'bn' ? 'ব্যাকআপ সফলভাবে সংরক্ষণ/শেয়ার হয়েছে!' : 'Backup exported successfully!');
-                      onRefresh();
-                    }
+                  onClick={() => {
+                    setShowExportModal(true);
+                    setExportPassphrase('');
+                    setExportError(null);
                   }}
                   className="w-full py-2.5 bg-[#007F73] hover:bg-[#006e63] text-white rounded-xl font-bold flex items-center justify-center gap-2 shadow-sm transition"
                 >
@@ -699,10 +770,10 @@ export const AdminSettingsModal: React.FC<SettingsModalProps> = ({
                   </label>
                   <label className="w-full py-2.5 px-3 border-2 border-dashed border-[#DCE4E1] dark:border-[#1E302B] rounded-xl flex items-center justify-center gap-2 cursor-pointer hover:bg-[#F0F4F2] dark:hover:bg-[#101A17] text-[#17211F] dark:text-stone-200 font-semibold transition">
                     <Upload className="w-4 h-4 text-[#626E6A] dark:text-stone-400" />
-                    <span>{lang === 'bn' ? 'ফাইল বাছাই করুন (.txt / .json)' : 'Select Backup File (.txt / .json)'}</span>
+                    <span>{lang === 'bn' ? 'ফাইল বাছাই করুন (.msmsbak / .json)' : 'Select Backup File (.msmsbak / .json)'}</span>
                     <input
                       type="file"
-                      accept=".txt,.json"
+                      accept=".msmsbak,.json,.txt"
                       onChange={handleFileUpload}
                       className="hidden"
                     />
@@ -738,24 +809,30 @@ export const AdminSettingsModal: React.FC<SettingsModalProps> = ({
                     ? 'পরীক্ষামূলক ব্যবহারের জন্য কয়েকটি জনপ্রিয় বাঙালি মিষ্টি ও নমুনা বিক্রি ডাটা লোড করুন।' 
                     : 'Load sample sweet items and sales figures for testing and evaluation.'}
                 </p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!activeShopId) return;
-                    const confirmMsg = lang === 'bn'
-                      ? 'আপনি কি নিশ্চিত যে এই দোকানে নমুনা মিষ্টি ও বিক্রির ডাটা লোড করতে চান?'
-                      : 'Are you sure you want to load sample sweet shop products and demo sales data for this shop?';
-                    if (window.confirm(confirmMsg)) {
-                      StorageService.loadAuthenticBengaliDemoData(activeShopId);
-                      showToast(lang === 'bn' ? 'বাঙালি মিষ্টি ও বিক্রির নমুনা লোড হয়েছে!' : 'Sample data loaded!');
-                      onRefresh();
-                    }
-                  }}
-                  className="px-3 py-1.5 bg-[#007F73] hover:bg-[#006e63] text-white rounded-xl font-bold flex items-center gap-1.5 transition shadow-sm text-xs"
-                >
-                  <Sparkles className="w-3.5 h-3.5" />
-                  {lang === 'bn' ? 'নমুনা ডাটা (Sample data)' : 'Sample data'}
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!activeShopId) return;
+                      setShowDemoConfirm(true);
+                    }}
+                    className="px-3 py-1.5 bg-[#007F73] hover:bg-[#006e63] text-white rounded-xl font-bold flex items-center gap-1.5 transition shadow-sm text-xs"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    {lang === 'bn' ? 'নমুনা ডাটা লোড করুন' : 'Load sample data'}
+                  </button>
+
+                  {StorageService.hasDemoData() && (
+                    <button
+                      type="button"
+                      onClick={() => setShowRemoveDemoConfirm(true)}
+                      className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-bold flex items-center gap-1.5 transition shadow-sm text-xs"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      {lang === 'bn' ? 'নমুনা ডাটা মুছে ফেলুন' : 'Remove sample data'}
+                    </button>
+                  )}
+                </div>
               </div>
 
               {/* Erase Stock Only (Requires dedicated Stock Erase Key) */}
@@ -967,6 +1044,156 @@ export const AdminSettingsModal: React.FC<SettingsModalProps> = ({
             >
               {t.cancelReset}
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Load Sample Data Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={showDemoConfirm}
+        title={lang === 'bn' ? 'নমুনা ডাটা লোড' : 'Load Sample Data'}
+        message={
+          lang === 'bn'
+            ? 'আপনি কি নিশ্চিত যে এই দোকানে নমুনা মিষ্টি ও বিক্রির ডাটা লোড করতে চান?'
+            : 'Are you sure you want to load sample sweet shop products and demo sales data for this shop?'
+        }
+        confirmText={lang === 'bn' ? 'লোড করুন' : 'Load Sample Data'}
+        cancelText={lang === 'bn' ? 'বাতিল' : 'Cancel'}
+        onConfirm={() => {
+          if (!activeShopId) return;
+          StorageService.loadAuthenticBengaliDemoData(activeShopId);
+          setShowDemoConfirm(false);
+          showToast(lang === 'bn' ? 'বাঙালি মিষ্টি ও বিক্রির নমুনা লোড হয়েছে!' : 'Sample data loaded!');
+          onRefresh();
+        }}
+        onCancel={() => setShowDemoConfirm(false)}
+        lang={lang}
+      />
+
+      {/* Remove Sample Data Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={showRemoveDemoConfirm}
+        title={lang === 'bn' ? 'নমুনা ডাটা মুছে ফেলুন' : 'Remove Sample Data'}
+        message={
+          lang === 'bn'
+            ? 'আপনি কি নিশ্চিত যে সমস্ত চিহ্নিত নমুনা মিষ্টি, স্টক এবং বিক্রির ডাটা মুছে ফেলতে চান?'
+            : 'Are you sure you want to remove all marked sample products, demo stock and sales?'
+        }
+        isDanger={true}
+        confirmText={lang === 'bn' ? 'মুছে ফেলুন' : 'Remove'}
+        cancelText={lang === 'bn' ? 'বাতিল' : 'Cancel'}
+        onConfirm={() => {
+          StorageService.removeDemoData();
+          setShowRemoveDemoConfirm(false);
+          showToast(lang === 'bn' ? 'সকল নমুনা ডাটা সফলভাবে মুছে ফেলা হয়েছে!' : 'Sample data removed successfully!');
+          onRefresh();
+        }}
+        onCancel={() => setShowRemoveDemoConfirm(false)}
+        lang={lang}
+      />
+
+      {/* Export Encrypted Backup Modal */}
+      {showExportModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+          <div className="w-full max-w-sm bg-white dark:bg-[#14201C] rounded-3xl p-6 shadow-2xl border border-[#DCE4E1] dark:border-[#1E302B] text-[#17211F] dark:text-stone-100">
+            <div className="w-12 h-12 rounded-2xl bg-[#007F73]/10 dark:bg-teal-950/70 text-[#007F73] dark:text-teal-400 mx-auto flex items-center justify-center mb-3">
+              <Lock className="w-6 h-6" />
+            </div>
+            <h3 className="text-base font-bold text-center">
+              {lang === 'bn' ? 'এনক্রিপ্টেড ব্যাকআপ পাসফ্রেজ' : 'Encrypted Backup Passphrase'}
+            </h3>
+            <p className="text-xs text-[#626E6A] dark:text-stone-400 text-center mt-1 mb-4">
+              {lang === 'bn'
+                ? 'ব্যাকআপ ফাইলটি নিরাপদ রাখতে অন্তত ৮ অক্ষরের একটি পাসফ্রেজ নির্ধারণ করুন।'
+                : 'Enter a passphrase (min 8 characters) to encrypt this backup file.'}
+            </p>
+
+            {exportError && (
+              <div className="mb-3 p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-700 dark:text-rose-300 text-xs">
+                {exportError}
+              </div>
+            )}
+
+            <form onSubmit={handleExecuteExport} className="space-y-3">
+              <input
+                type="password"
+                required
+                minLength={8}
+                value={exportPassphrase}
+                onChange={e => setExportPassphrase(e.target.value)}
+                placeholder="••••••••••••"
+                className="w-full px-3.5 py-2.5 bg-[#F0F4F2] dark:bg-[#101A17] border border-[#DCE4E1] dark:border-[#1E302B] rounded-xl text-sm outline-none focus:border-[#007F73] text-[#17211F] dark:text-stone-100"
+              />
+              <div className="flex gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setShowExportModal(false)}
+                  className="flex-1 py-2.5 bg-[#F0F4F2] dark:bg-[#162420] text-[#17211F] dark:text-stone-200 rounded-xl text-xs font-semibold"
+                >
+                  {lang === 'bn' ? 'বাতিল' : 'Cancel'}
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-2.5 bg-[#007F73] hover:bg-[#00685E] text-white rounded-xl text-xs font-bold shadow-xs"
+                >
+                  {lang === 'bn' ? 'ডাউনলোড' : 'Export (.msmsbak)'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Restore Encrypted Backup Modal */}
+      {showRestorePassphraseModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+          <div className="w-full max-w-sm bg-white dark:bg-[#14201C] rounded-3xl p-6 shadow-2xl border border-[#DCE4E1] dark:border-[#1E302B] text-[#17211F] dark:text-stone-100">
+            <div className="w-12 h-12 rounded-2xl bg-amber-50 dark:bg-amber-950/70 text-amber-600 dark:text-amber-400 mx-auto flex items-center justify-center mb-3">
+              <Lock className="w-6 h-6" />
+            </div>
+            <h3 className="text-base font-bold text-center">
+              {lang === 'bn' ? 'ব্যাকআপ পাসফ্রেজ দিন' : 'Enter Backup Passphrase'}
+            </h3>
+            <p className="text-xs text-[#626E6A] dark:text-stone-400 text-center mt-1 mb-4">
+              {lang === 'bn'
+                ? 'এই ব্যাকআপ ফাইলটি সংকেতায়িত (এনক্রিপ্টেড)। রিস্টোর করতে পাসফ্রেজ দিন।'
+                : 'This backup is encrypted. Enter the passphrase used during export to restore.'}
+            </p>
+
+            {restoreError && (
+              <div className="mb-3 p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-700 dark:text-rose-300 text-xs">
+                {restoreError}
+              </div>
+            )}
+
+            <form onSubmit={handleExecuteRestoreEncrypted} className="space-y-3">
+              <input
+                type="password"
+                required
+                value={restorePassphrase}
+                onChange={e => setRestorePassphrase(e.target.value)}
+                placeholder="••••••••••••"
+                className="w-full px-3.5 py-2.5 bg-[#F0F4F2] dark:bg-[#101A17] border border-[#DCE4E1] dark:border-[#1E302B] rounded-xl text-sm outline-none focus:border-[#007F73] text-[#17211F] dark:text-stone-100"
+              />
+              <div className="flex gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowRestorePassphraseModal(false);
+                    setPendingRestoreContent(null);
+                  }}
+                  className="flex-1 py-2.5 bg-[#F0F4F2] dark:bg-[#162420] text-[#17211F] dark:text-stone-200 rounded-xl text-xs font-semibold"
+                >
+                  {lang === 'bn' ? 'বাতিল' : 'Cancel'}
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-2.5 bg-[#007F73] hover:bg-[#00685E] text-white rounded-xl text-xs font-bold shadow-xs"
+                >
+                  {lang === 'bn' ? 'রিস্টোর করুন' : 'Decrypt & Restore'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

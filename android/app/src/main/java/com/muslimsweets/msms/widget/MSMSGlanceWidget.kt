@@ -43,7 +43,7 @@ class MSMSGlanceWidget : GlanceAppWidget() {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "MSMS • Muslim Sweets",
+                    text = "MSMS",
                     style = TextStyle(
                         fontWeight = FontWeight.Bold,
                         fontSize = 14.sp,

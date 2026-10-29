@@ -143,7 +143,7 @@ export const CreateFirstShopModal: React.FC<CreateFirstShopModalProps> = ({
                 required
                 value={address}
                 onChange={e => setAddress(e.target.value)}
-                placeholder="e.g. Station Road, Bazar Area"
+                placeholder={lang === 'bn' ? 'যেমন: রাস্তা, এলাকা, শহর' : 'e.g. Street, Area, City'}
                 className="w-full pl-9 pr-3 py-2.5 bg-[#F0F4F2] dark:bg-[#101A17] border border-[#DCE4E1] dark:border-[#1E302B] rounded-xl text-sm text-[#17211F] dark:text-stone-100 placeholder-[#626E6A] outline-none focus:ring-2 focus:ring-[#007F73]/30 focus:border-[#007F73]"
               />
             </div>

@@ -93,7 +93,7 @@ export const FirstShopModal: React.FC<FirstShopModalProps> = ({ lang, onShopCrea
                 setNameEn(e.target.value);
                 if (error) setError(null);
               }}
-              placeholder={lang === 'bn' ? 'যেমন: Sweet Heaven Bakery' : 'e.g. My Sweet Shop'}
+              placeholder={lang === 'bn' ? 'যেমন: আমার মিষ্টির দোকান' : 'e.g. My Sweet Shop'}
               className="w-full px-3.5 py-2.5 bg-[#F5F7F8] dark:bg-[#101A17] border border-[#DCE4E1] dark:border-[#1E302B] rounded-xl outline-none focus:ring-2 focus:ring-[#007F73]/30 focus:border-[#007F73] text-[#17211F] dark:text-stone-100 text-xs font-semibold placeholder-[#626E6A]"
             />
           </div>
@@ -106,7 +106,7 @@ export const FirstShopModal: React.FC<FirstShopModalProps> = ({ lang, onShopCrea
               type="text"
               value={nameBn}
               onChange={e => setNameBn(e.target.value)}
-              placeholder={lang === 'bn' ? 'যেমন: সুইট হেভেন বেকারি' : 'e.g. মিষ্টির দোকান'}
+              placeholder="যেমন: আমার মিষ্টির দোকান"
               className="w-full px-3.5 py-2.5 bg-[#F5F7F8] dark:bg-[#101A17] border border-[#DCE4E1] dark:border-[#1E302B] rounded-xl outline-none focus:ring-2 focus:ring-[#007F73]/30 focus:border-[#007F73] text-[#17211F] dark:text-stone-100 text-xs placeholder-[#626E6A]"
             />
           </div>
@@ -121,7 +121,7 @@ export const FirstShopModal: React.FC<FirstShopModalProps> = ({ lang, onShopCrea
                 type="text"
                 value={address}
                 onChange={e => setAddress(e.target.value)}
-                placeholder={lang === 'bn' ? 'যেমন: স্টেশন বাজার, রোড ১২' : 'e.g. 12 Station Road, Central Bazar'}
+                placeholder={lang === 'bn' ? 'যেমন: রাস্তা, এলাকা, শহর' : 'e.g. Street, Area, City'}
                 className="w-full pl-9 pr-3.5 py-2.5 bg-[#F5F7F8] dark:bg-[#101A17] border border-[#DCE4E1] dark:border-[#1E302B] rounded-xl outline-none focus:ring-2 focus:ring-[#007F73]/30 focus:border-[#007F73] text-[#17211F] dark:text-stone-100 text-xs placeholder-[#626E6A]"
               />
             </div>
