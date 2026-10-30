@@ -117,9 +117,9 @@ async function encryptValue(key: string, plaintext: string): Promise<string> {
   const aad = new TextEncoder().encode(key);
   const data = new TextEncoder().encode(plaintext);
   const cipherBuffer = await crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv, additionalData: aad },
+    { name: 'AES-GCM', iv: iv as unknown as BufferSource, additionalData: aad as unknown as BufferSource },
     masterCryptoKey,
-    data
+    data as unknown as BufferSource
   );
   const ivB64 = bytesToBase64(iv);
   const ctB64 = bytesToBase64(new Uint8Array(cipherBuffer));
@@ -136,9 +136,9 @@ async function decryptValue(key: string, encrypted: string): Promise<string> {
   const ct = base64ToBytes(parts[2]);
   const aad = new TextEncoder().encode(key);
   const plainBuffer = await crypto.subtle.decrypt(
-    { name: 'AES-GCM', iv, additionalData: aad },
+    { name: 'AES-GCM', iv: iv as unknown as BufferSource, additionalData: aad as unknown as BufferSource },
     masterCryptoKey,
-    ct
+    ct as unknown as BufferSource
   );
   return new TextDecoder().decode(plainBuffer);
 }
@@ -248,11 +248,11 @@ export class Vault {
     try {
       while (pendingWrites.size > 0) {
         const nextKey = pendingWrites.keys().next().value;
-        if (!nextKey) break;
+        if (typeof nextKey !== 'string') break;
         const val = pendingWrites.get(nextKey);
         pendingWrites.delete(nextKey);
 
-        if (val === null) {
+        if (val === null || val === undefined) {
           localStorage.removeItem(nextKey);
         } else {
           try {

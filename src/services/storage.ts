@@ -43,10 +43,10 @@ const STORAGE_KEYS = {
 };
 
 export const DEFAULT_TASK_CATEGORIES: TaskCategory[] = [
-  { id: 'kitchen', name: 'Kitchen', nameBn: 'রান্নাঘর' },
-  { id: 'counter', name: 'Counter', nameBn: 'কাউন্টার' },
-  { id: 'hygiene', name: 'Hygiene', nameBn: 'পরিচ্ছন্নতা' },
-  { id: 'accounts', name: 'Accounts', nameBn: 'হিসাব খাতা' },
+  { id: 'kitchen', name: 'Kitchen', nameBn: 'রান্নাঘর', color: '#007F73' },
+  { id: 'counter', name: 'Counter', nameBn: 'কাউন্টার', color: '#D97706' },
+  { id: 'hygiene', name: 'Hygiene', nameBn: 'পরিচ্ছন্নতা', color: '#2563EB' },
+  { id: 'accounts', name: 'Accounts', nameBn: 'হিসাব খাতা', color: '#7C3AED' },
 ];
 
 // PBKDF2-SHA-256 with random 16-byte salt per user and 210,000 iterations
@@ -516,11 +516,17 @@ export class StorageService {
     const products = this.getProducts();
     const product = products.find(p => p.id === entry.productId);
     if (product) {
-      product.currentStock += entry.quantityAdded;
-      product.updatedAt = new Date().toISOString();
-      this.saveProduct(product);
+      if (entry.quantityAdded > 0) {
+        product.currentStock += entry.quantityAdded;
+        product.updatedAt = new Date().toISOString();
+        this.saveProduct(product);
+      }
     }
-    this.logAction('STOCK_ADDED', `Added ${entry.quantityAdded} ${entry.unit} to ${entry.productName}`);
+    if (entry.quantityAdded === 0) {
+      this.logAction('ZERO_STOCK_RECORDED', `Logged daily zero-stock record for ${entry.productName}`);
+    } else {
+      this.logAction('STOCK_ADDED', `Added ${entry.quantityAdded} ${entry.unit} to ${entry.productName}`);
+    }
   }
 
   // Sales History
@@ -579,7 +585,7 @@ export class StorageService {
     const raw = Vault.get(STORAGE_KEYS.TASK_CATEGORIES);
     const allShopCategories: { shopId: string; categories: TaskCategory[] }[] = raw ? JSON.parse(raw) : [];
     const shopEntry = allShopCategories.find(entry => entry.shopId === shopId);
-    if (shopEntry && shopEntry.categories && shopEntry.categories.length > 0) {
+    if (shopEntry && shopEntry.categories) {
       return shopEntry.categories;
     }
     return DEFAULT_TASK_CATEGORIES;
@@ -597,7 +603,7 @@ export class StorageService {
     Vault.set(STORAGE_KEYS.TASK_CATEGORIES, JSON.stringify(allShopCategories));
   }
 
-  static addTaskCategory(shopId: string, name: string, nameBn: string): TaskCategory {
+  static addTaskCategory(shopId: string, name: string, nameBn: string, color?: string): TaskCategory {
     const list = this.getTaskCategories(shopId);
     const id = name.toLowerCase().replace(/[^a-z0-9]/g, '_') || 'custom_cat';
     let uniqueId = id;
@@ -609,6 +615,7 @@ export class StorageService {
       id: uniqueId,
       name: name.trim(),
       nameBn: nameBn.trim() || name.trim(),
+      color: color || '#007F73',
     };
     list.push(newCategory);
     this.saveTaskCategories(shopId, list);
@@ -627,11 +634,38 @@ export class StorageService {
     }
   }
 
+  static updateTaskCategory(shopId: string, id: string, name: string, nameBn: string, color?: string): void {
+    const list = this.getTaskCategories(shopId);
+    const cat = list.find(c => c.id === id);
+    if (cat) {
+      cat.name = name.trim();
+      cat.nameBn = nameBn.trim() || name.trim();
+      if (color) cat.color = color;
+      this.saveTaskCategories(shopId, list);
+      this.logAction('TASK_CATEGORY_UPDATED', `Updated category ${id} to ${name} (${nameBn})`);
+    }
+  }
+
+  static resetTaskCategoriesToDefault(shopId: string): TaskCategory[] {
+    const defaults = [...DEFAULT_TASK_CATEGORIES];
+    this.saveTaskCategories(shopId, defaults);
+    this.logAction('TASK_CATEGORIES_RESET', `Reset categories to default for shop ${shopId}`);
+    return defaults;
+  }
+
   static deleteTaskCategory(shopId: string, id: string): void {
     const list = this.getTaskCategories(shopId);
     const updated = list.filter(c => c.id !== id);
     this.saveTaskCategories(shopId, updated);
     this.logAction('TASK_CATEGORY_DELETED', `Deleted category ${id} for shop ${shopId}`);
+  }
+
+  static removeDemoTasks(shopId: string): void {
+    const raw = Vault.get(STORAGE_KEYS.TASKS);
+    const all: ShopTask[] = raw ? JSON.parse(raw) : [];
+    const remaining = all.filter(t => !(t.shopId === shopId && t.isDemo));
+    Vault.set(STORAGE_KEYS.TASKS, JSON.stringify(remaining));
+    this.logAction('DEMO_TASKS_REMOVED', `Removed demo checklist tasks for shop ${shopId}`);
   }
 
   // Task Management
@@ -943,7 +977,7 @@ export class StorageService {
   }
 
   static addStockEntry(entry: StockEntry): void {
-    this.recordStockEntry(entry);
+    this.addStockMovement(entry);
   }
 
   static addSaleRecord(sale: SaleRecord): void {

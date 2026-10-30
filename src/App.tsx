@@ -33,6 +33,7 @@ import { AdminSettingsModal } from './components/AdminSettingsModal';
 import { MultiShopModal } from './components/MultiShopModal';
 import { TaskManagementTab } from './components/TaskManagementTab';
 import { CreateFirstShopModal } from './components/CreateFirstShopModal';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import {
   Store,
   Plus,
@@ -1379,13 +1380,21 @@ export default function App() {
 
         {/* TASK MANAGEMENT TAB */}
         {activeTab === 'tasks' && (
-          <TaskManagementTab
-            tasks={tasks}
-            activeShopId={activeShopId}
+          <ErrorBoundary
             lang={lang}
-            currentUser={currentUser}
-            onRefresh={triggerRefresh}
-          />
+            activeShopId={activeShopId}
+            fallbackTitle="Task system encountered an issue"
+            fallbackTitleBn="টাস্ক সিস্টেমে একটি সমস্যা দেখা দিয়েছে"
+            onReset={triggerRefresh}
+          >
+            <TaskManagementTab
+              tasks={tasks}
+              activeShopId={activeShopId}
+              lang={lang}
+              currentUser={currentUser}
+              onRefresh={triggerRefresh}
+            />
+          </ErrorBoundary>
         )}
 
         {/* ANDROID WIDGET & APK TAB */}

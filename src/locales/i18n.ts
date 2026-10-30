@@ -50,6 +50,47 @@ export function formatCurrency(
   return `${symbol} ${formatted}`;
 }
 
+export function formatStockDateTime(
+  dateTimeStr?: string,
+  lang: 'en' | 'bn' = 'en'
+): { dateStr: string; timeStr: string; fullStr: string } {
+  if (!dateTimeStr) {
+    const unavail = lang === 'bn' ? 'তারিখ অনুপলব্ধ' : 'Date unavailable';
+    return { dateStr: unavail, timeStr: '', fullStr: unavail };
+  }
+  const d = new Date(dateTimeStr);
+  if (isNaN(d.getTime())) {
+    const unavail = lang === 'bn' ? 'তারিখ অনুপলব্ধ' : 'Date unavailable';
+    return { dateStr: unavail, timeStr: '', fullStr: unavail };
+  }
+
+  // 12-hour time format with AM/PM (e.g. 10:09 PM)
+  let hours = d.getHours();
+  const minutes = d.getMinutes();
+  const ampm = hours >= 12 ? 'PM' : 'AM';
+  hours = hours % 12;
+  hours = hours ? hours : 12;
+  const minStr = minutes < 10 ? `0${minutes}` : `${minutes}`;
+  const rawTimeStr = `${hours}:${minStr} ${ampm}`;
+
+  // Readable date format: e.g. 29 Oct 2026
+  const day = d.getDate();
+  const monthsEn = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const monthsBn = ['জানু', 'ফেব্রু', 'মার্চ', 'এপ্রিল', 'মে', 'জুন', 'জুলাই', 'আগস্ট', 'সেপ্টে', 'অক্টো', 'নভে', 'ডিসে'];
+  const monthStr = lang === 'bn' ? monthsBn[d.getMonth()] : monthsEn[d.getMonth()];
+  const year = d.getFullYear();
+  const rawDateStr = `${day} ${monthStr} ${year}`;
+
+  const dateStr = lang === 'bn' ? formatNumber(rawDateStr, 'bn') : rawDateStr;
+  const timeStr = lang === 'bn' ? formatNumber(rawTimeStr, 'bn') : rawTimeStr;
+
+  return {
+    dateStr,
+    timeStr,
+    fullStr: `${dateStr}, ${timeStr}`,
+  };
+}
+
 export const TRANSLATIONS = {
   en: {
     appTitle: 'Muslim Sweets Management System',

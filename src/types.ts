@@ -107,6 +107,7 @@ export interface TaskCategory {
   id: string;
   name: string;
   nameBn: string;
+  color?: string;
 }
 
 export interface ShopTask {

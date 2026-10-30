@@ -21,6 +21,7 @@ import {
   Tag,
   AlertTriangle,
   Layers,
+  Sparkles,
 } from 'lucide-react';
 
 interface TaskManagementTabProps {
@@ -49,12 +50,14 @@ export const TaskManagementTab: React.FC<TaskManagementTabProps> = ({
   const [showCategoryModal, setShowCategoryModal] = useState(false);
   const [newCatNameEn, setNewCatNameEn] = useState('');
   const [newCatNameBn, setNewCatNameBn] = useState('');
+  const [newCatColor, setNewCatColor] = useState('#007F73');
   const [catError, setCatError] = useState('');
 
   // Editing Category Inline in Modal
   const [editingCatId, setEditingCatId] = useState<string | null>(null);
   const [editCatNameEn, setEditCatNameEn] = useState('');
   const [editCatNameBn, setEditCatNameBn] = useState('');
+  const [editCatColor, setEditCatColor] = useState('#007F73');
 
   // Category Deletion Confirmation Modal (with reallocate / delete tasks)
   const [catToDelete, setCatToDelete] = useState<{ category: TaskCategory; taskCount: number } | null>(null);
@@ -77,6 +80,7 @@ export const TaskManagementTab: React.FC<TaskManagementTabProps> = ({
   // Delete Task Confirmation Modal
   const [taskToDelete, setTaskToDelete] = useState<ShopTask | null>(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [showRemoveDemoConfirm, setShowRemoveDemoConfirm] = useState(false);
   const [catAlertMsg, setCatAlertMsg] = useState<string | null>(null);
 
   // Load categories whenever active shop changes
@@ -285,9 +289,10 @@ export const TaskManagementTab: React.FC<TaskManagementTabProps> = ({
       return;
     }
 
-    StorageService.addTaskCategory(activeShopId, en, bn);
+    StorageService.addTaskCategory(activeShopId, en, bn, newCatColor);
     setNewCatNameEn('');
     setNewCatNameBn('');
+    setNewCatColor('#007F73');
     loadCategories();
   };
 
@@ -295,6 +300,7 @@ export const TaskManagementTab: React.FC<TaskManagementTabProps> = ({
     setEditingCatId(cat.id);
     setEditCatNameEn(cat.name);
     setEditCatNameBn(cat.nameBn || cat.name);
+    setEditCatColor(cat.color || '#007F73');
   };
 
   const handleSaveRenameCategory = (catId: string) => {
@@ -311,22 +317,13 @@ export const TaskManagementTab: React.FC<TaskManagementTabProps> = ({
       return;
     }
 
-    StorageService.renameTaskCategory(activeShopId, catId, en, bn);
+    StorageService.updateTaskCategory(activeShopId, catId, en, bn, editCatColor);
     setEditingCatId(null);
     loadCategories();
     onRefresh();
   };
 
   const handleInitiateDeleteCategory = (cat: TaskCategory) => {
-    if (taskCategories.length <= 1) {
-      setCatAlertMsg(
-        lang === 'bn'
-          ? 'কমপক্ষে একটি ক্যাটাগরি থাকতে হবে।'
-          : 'You must have at least one category remaining.'
-      );
-      return;
-    }
-
     const tasksInCat = tasks.filter(t => t.category === cat.id);
     const otherCats = taskCategories.filter(c => c.id !== cat.id);
 
@@ -342,6 +339,12 @@ export const TaskManagementTab: React.FC<TaskManagementTabProps> = ({
       loadCategories();
       onRefresh();
     }
+  };
+
+  const handleRemoveDemoTasks = () => {
+    StorageService.removeDemoTasks(activeShopId);
+    setShowRemoveDemoConfirm(false);
+    onRefresh();
   };
 
   // Confirm delete category with tasks
@@ -462,69 +465,121 @@ export const TaskManagementTab: React.FC<TaskManagementTabProps> = ({
         )}
       </div>
 
-      {/* Category Filter Pills */}
-      <div className="flex items-center gap-2 overflow-x-auto pb-1 text-xs">
-        {/* All Tasks Pill */}
-        <button
-          onClick={() => setFilterCategory('all')}
-          className={`px-3.5 py-2 rounded-xl font-medium transition whitespace-nowrap min-h-[36px] flex items-center gap-1.5 ${
-            filterCategory === 'all'
-              ? 'bg-[#007F73] text-white font-bold shadow-xs'
-              : 'bg-white dark:bg-[#14201C] text-[#626E6A] dark:text-stone-300 border border-[#DCE4E1] dark:border-[#1E302B] hover:bg-[#F0F4F2] dark:hover:bg-[#162420]'
-          }`}
-        >
-          <Layers className="w-3.5 h-3.5" />
-          <span>{lang === 'bn' ? 'সকল কাজ' : 'All Tasks'}</span>
-          <span className="text-[10px] opacity-80 font-mono">({tasks.length})</span>
-        </button>
-
-        {/* Dynamic Category Pills */}
-        {taskCategories.map(cat => {
-          const count = tasks.filter(t => t.category === cat.id).length;
-          const isSelected = filterCategory === cat.id;
-          return (
-            <button
-              key={cat.id}
-              onClick={() => setFilterCategory(cat.id)}
-              className={`px-3.5 py-2 rounded-xl font-medium transition whitespace-nowrap min-h-[36px] flex items-center gap-1.5 ${
-                isSelected
-                  ? 'bg-[#007F73] text-white font-bold shadow-xs'
-                  : 'bg-white dark:bg-[#14201C] text-[#626E6A] dark:text-stone-300 border border-[#DCE4E1] dark:border-[#1E302B] hover:bg-[#F0F4F2] dark:hover:bg-[#162420]'
-              }`}
-            >
-              <span>{lang === 'bn' ? cat.nameBn || cat.name : cat.name}</span>
-              <span className="text-[10px] opacity-75 font-mono">({count})</span>
-            </button>
-          );
-        })}
-
-        {/* Master Admin Category Shortcut & Quick Add */}
-        {isMaster && (
-          <div className="flex items-center gap-1 shrink-0 ml-1">
-            <button
-              onClick={() => {
-                setShowCategoryModal(true);
-                setCatError('');
-              }}
-              title="Manage Categories"
-              className="p-2 rounded-xl text-[#007F73] dark:text-teal-400 bg-white dark:bg-[#14201C] border border-dashed border-[#007F73]/50 hover:bg-[#007F73]/10 transition flex items-center gap-1 text-xs font-semibold"
-            >
-              <Edit2 className="w-3.5 h-3.5" />
-              <span className="hidden md:inline">{lang === 'bn' ? 'সম্পাদনা' : 'Manage'}</span>
-            </button>
-            <button
-              onClick={() => {
-                setShowCategoryModal(true);
-                setCatError('');
-              }}
-              title="Add Category"
-              className="p-2 rounded-xl text-[#007F73] dark:text-teal-400 bg-white dark:bg-[#14201C] border border-dashed border-[#007F73]/50 hover:bg-[#007F73]/10 transition flex items-center text-xs font-semibold"
-            >
-              <Plus className="w-3.5 h-3.5" />
-            </button>
+      {/* Category Filter Pills / Empty State */}
+      {taskCategories.length === 0 ? (
+        <div className="p-3.5 rounded-2xl bg-white dark:bg-[#14201C] border border-dashed border-[#DCE4E1] dark:border-[#1E302B] flex flex-wrap items-center justify-between gap-3 text-xs shadow-xs">
+          <div className="flex items-center gap-2 text-[#626E6A] dark:text-stone-400">
+            <Tag className="w-4 h-4 text-[#007F73]" />
+            <span>{lang === 'bn' ? 'কোনো ক্যাটাগরি তৈরি করা হয়নি' : 'No task categories yet'}</span>
           </div>
-        )}
-      </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                StorageService.resetTaskCategoriesToDefault(activeShopId);
+                loadCategories();
+              }}
+              className="px-3 py-1.5 bg-[#F0F4F2] hover:bg-[#E4ECE9] dark:bg-[#162420] text-[#007F73] dark:text-teal-300 rounded-xl font-bold transition text-xs"
+            >
+              {lang === 'bn' ? 'ডিফল্ট ক্যাটাগরি লোড' : 'Load Defaults'}
+            </button>
+            {isMaster && (
+              <button
+                onClick={() => {
+                  setShowCategoryModal(true);
+                  setCatError('');
+                }}
+                className="px-3 py-1.5 bg-[#007F73] text-white rounded-xl font-bold transition text-xs"
+              >
+                {lang === 'bn' ? '+ নতুন ক্যাটাগরি' : '+ Add Category'}
+              </button>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className="flex items-center gap-2 overflow-x-auto pb-1 text-xs">
+          {/* All Tasks Pill */}
+          <button
+            onClick={() => setFilterCategory('all')}
+            className={`px-3.5 py-2 rounded-xl font-medium transition whitespace-nowrap min-h-[36px] flex items-center gap-1.5 ${
+              filterCategory === 'all'
+                ? 'bg-[#007F73] text-white font-bold shadow-xs'
+                : 'bg-white dark:bg-[#14201C] text-[#626E6A] dark:text-stone-300 border border-[#DCE4E1] dark:border-[#1E302B] hover:bg-[#F0F4F2] dark:hover:bg-[#162420]'
+            }`}
+          >
+            <Layers className="w-3.5 h-3.5" />
+            <span>{lang === 'bn' ? 'সকল কাজ' : 'All Tasks'}</span>
+            <span className="text-[10px] opacity-80 font-mono">({tasks.length})</span>
+          </button>
+
+          {/* Dynamic Category Pills with color dot */}
+          {taskCategories.map(cat => {
+            const count = tasks.filter(t => t.category === cat.id).length;
+            const isSelected = filterCategory === cat.id;
+            return (
+              <button
+                key={cat.id}
+                onClick={() => setFilterCategory(cat.id)}
+                className={`px-3.5 py-2 rounded-xl font-medium transition whitespace-nowrap min-h-[36px] flex items-center gap-2 ${
+                  isSelected
+                    ? 'bg-[#007F73] text-white font-bold shadow-xs'
+                    : 'bg-white dark:bg-[#14201C] text-[#626E6A] dark:text-stone-300 border border-[#DCE4E1] dark:border-[#1E302B] hover:bg-[#F0F4F2] dark:hover:bg-[#162420]'
+                }`}
+              >
+                <span
+                  className="w-2.5 h-2.5 rounded-full shrink-0"
+                  style={{ backgroundColor: cat.color || '#007F73' }}
+                />
+                <span>{lang === 'bn' ? cat.nameBn || cat.name : cat.name}</span>
+                <span className="text-[10px] opacity-75 font-mono">({count})</span>
+              </button>
+            );
+          })}
+
+          {/* Master Admin Category Shortcut & Quick Add */}
+          {isMaster && (
+            <div className="flex items-center gap-1 shrink-0 ml-1">
+              <button
+                onClick={() => {
+                  setShowCategoryModal(true);
+                  setCatError('');
+                }}
+                title="Manage Categories"
+                className="p-2 rounded-xl text-[#007F73] dark:text-teal-400 bg-white dark:bg-[#14201C] border border-dashed border-[#007F73]/50 hover:bg-[#007F73]/10 transition flex items-center gap-1 text-xs font-semibold"
+              >
+                <Edit2 className="w-3.5 h-3.5" />
+                <span className="hidden md:inline">{lang === 'bn' ? 'ক্যাটাগরি' : 'Categories'}</span>
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Priority 2: Sample Tasks Banner & Cleanup Action */}
+      {tasks.some(t => t.isDemo) && (
+        <div className="p-3.5 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 rounded-2xl flex flex-wrap items-center justify-between gap-3 text-xs shadow-xs">
+          <div className="flex items-center gap-2.5 text-amber-900 dark:text-amber-200">
+            <Sparkles className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+            <div>
+              <span className="font-bold">
+                {lang === 'bn' ? 'নমুনা কাজ সক্রিয় রয়েছে' : 'Sample Tasks Active'}
+              </span>
+              <p className="text-[11px] text-amber-700 dark:text-amber-300">
+                {lang === 'bn'
+                  ? 'আপনার নিজস্ব কাজ বজায় রেখে যেকোনো সময় নমুনা কাজগুলো এক ক্লিকে মুছে ফেলতে পারেন।'
+                  : 'You can remove sample tasks anytime without touching your custom tasks.'}
+              </p>
+            </div>
+          </div>
+          {isMaster && (
+            <button
+              onClick={() => setShowRemoveDemoConfirm(true)}
+              className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-bold text-xs shadow-xs transition"
+            >
+              {lang === 'bn' ? 'নমুনা কাজগুলো মুছুন' : 'Remove Sample Tasks'}
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Task Checklist Items */}
       {tasks.length === 0 ? (
@@ -632,6 +687,12 @@ export const TaskManagementTab: React.FC<TaskManagementTabProps> = ({
                     {getCategoryLabel(task.category)}
                   </span>
 
+                  {task.isDemo && (
+                    <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-900/50">
+                      {lang === 'bn' ? 'নমুনা' : 'Sample'}
+                    </span>
+                  )}
+
                   {task.dueDate && (
                     <span className="flex items-center gap-1 text-[11px] font-mono text-[#626E6A] dark:text-stone-400">
                       <Clock className="w-3 h-3 text-[#007F73]" />
@@ -729,25 +790,43 @@ export const TaskManagementTab: React.FC<TaskManagementTabProps> = ({
                     className="p-3 bg-[#F0F4F2]/50 dark:bg-[#101A17] border border-[#DCE4E1] dark:border-[#1E302B] rounded-2xl flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5"
                   >
                     {isEditing ? (
-                      <div className="flex-1 flex flex-col sm:flex-row gap-2">
-                        <input
-                          type="text"
-                          value={editCatNameEn}
-                          onChange={e => setEditCatNameEn(e.target.value)}
-                          placeholder="English name"
-                          className="flex-1 px-3 py-1.5 bg-white dark:bg-[#162420] border border-[#DCE4E1] dark:border-[#1E302B] rounded-xl text-xs text-[#17211F] dark:text-stone-100 outline-none focus:border-[#007F73]"
-                        />
-                        <input
-                          type="text"
-                          value={editCatNameBn}
-                          onChange={e => setEditCatNameBn(e.target.value)}
-                          placeholder="বাংলা নাম"
-                          className="flex-1 px-3 py-1.5 bg-white dark:bg-[#162420] border border-[#DCE4E1] dark:border-[#1E302B] rounded-xl text-xs text-[#17211F] dark:text-stone-100 outline-none focus:border-[#007F73]"
-                        />
+                      <div className="flex-1 flex flex-col gap-2">
+                        <div className="flex flex-col sm:flex-row gap-2">
+                          <input
+                            type="text"
+                            value={editCatNameEn}
+                            onChange={e => setEditCatNameEn(e.target.value)}
+                            placeholder="English name"
+                            className="flex-1 px-3 py-1.5 bg-white dark:bg-[#162420] border border-[#DCE4E1] dark:border-[#1E302B] rounded-xl text-xs text-[#17211F] dark:text-stone-100 outline-none focus:border-[#007F73]"
+                          />
+                          <input
+                            type="text"
+                            value={editCatNameBn}
+                            onChange={e => setEditCatNameBn(e.target.value)}
+                            placeholder="বাংলা নাম"
+                            className="flex-1 px-3 py-1.5 bg-white dark:bg-[#162420] border border-[#DCE4E1] dark:border-[#1E302B] rounded-xl text-xs text-[#17211F] dark:text-stone-100 outline-none focus:border-[#007F73]"
+                          />
+                        </div>
+                        <div className="flex items-center gap-1.5 pt-0.5">
+                          <span className="text-[10px] text-[#626E6A] dark:text-stone-400 font-semibold">{lang === 'bn' ? 'রং:' : 'Color:'}</span>
+                          {['#007F73', '#D97706', '#2563EB', '#7C3AED', '#E11D48', '#059669'].map(c => (
+                            <button
+                              key={c}
+                              type="button"
+                              onClick={() => setEditCatColor(c)}
+                              className={`w-4 h-4 rounded-full transition-transform ${editCatColor === c ? 'ring-2 ring-offset-1 ring-black dark:ring-white scale-125' : 'opacity-70 hover:opacity-100'}`}
+                              style={{ backgroundColor: c }}
+                            />
+                          ))}
+                        </div>
                       </div>
                     ) : (
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
+                          <span
+                            className="w-2.5 h-2.5 rounded-full shrink-0"
+                            style={{ backgroundColor: cat.color || '#007F73' }}
+                          />
                           <span className="text-xs font-bold text-[#17211F] dark:text-stone-100">
                             {cat.name}
                           </span>
@@ -789,7 +868,7 @@ export const TaskManagementTab: React.FC<TaskManagementTabProps> = ({
                             type="button"
                             onClick={() => handleStartEditCategory(cat)}
                             className="p-1.5 text-[#626E6A] dark:text-stone-400 hover:text-[#007F73] dark:hover:text-teal-300 hover:bg-white dark:hover:bg-[#162420] rounded-lg transition"
-                            title="Edit Category Name"
+                            title="Edit Category Name & Color"
                           >
                             <Edit2 className="w-3.5 h-3.5" />
                           </button>
@@ -814,7 +893,7 @@ export const TaskManagementTab: React.FC<TaskManagementTabProps> = ({
               <label className="block text-[11px] font-semibold text-[#17211F] dark:text-stone-200 mb-2">
                 {lang === 'bn' ? '+ নতুন ক্যাটাগরি তৈরি করুন' : '+ Add New Category'}
               </label>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2.5">
                 <input
                   type="text"
                   required
@@ -830,6 +909,24 @@ export const TaskManagementTab: React.FC<TaskManagementTabProps> = ({
                   placeholder="বাংলা (যেমন: প্যাকেট ও ডেলিভারি)"
                   className="px-3.5 py-2.5 bg-white dark:bg-[#101A17] border border-[#DCE4E1] dark:border-[#1E302B] rounded-xl text-xs font-medium outline-none focus:ring-2 focus:ring-[#007F73]/20 focus:border-[#007F73] text-[#17211F] dark:text-stone-100 placeholder-[#626E6A] dark:placeholder-stone-500"
                 />
+              </div>
+
+              {/* Color picker */}
+              <div className="flex items-center gap-2 mb-3">
+                <span className="text-[11px] text-[#626E6A] dark:text-stone-400 font-semibold">
+                  {lang === 'bn' ? 'রং নির্বাচন:' : 'Color:'}
+                </span>
+                <div className="flex items-center gap-1.5">
+                  {['#007F73', '#D97706', '#2563EB', '#7C3AED', '#E11D48', '#059669'].map(c => (
+                    <button
+                      key={c}
+                      type="button"
+                      onClick={() => setNewCatColor(c)}
+                      className={`w-5 h-5 rounded-full transition-transform ${newCatColor === c ? 'ring-2 ring-offset-1 ring-black dark:ring-white scale-125' : 'opacity-70 hover:opacity-100'}`}
+                      style={{ backgroundColor: c }}
+                    />
+                  ))}
+                </div>
               </div>
 
               <div className="flex justify-end gap-2">
@@ -874,43 +971,47 @@ export const TaskManagementTab: React.FC<TaskManagementTabProps> = ({
             </p>
 
             <div className="space-y-3 mb-5">
-              {/* Option A: Reallocate to another category */}
-              <div className="p-3.5 bg-[#F0F4F2] dark:bg-[#101A17] rounded-2xl border border-[#DCE4E1] dark:border-[#1E302B]">
-                <p className="text-xs font-bold text-[#17211F] dark:text-stone-100 mb-2">
-                  {lang === 'bn'
-                    ? '১. কাজগুলো অন্য ক্যাটাগরিতে স্থানান্তর করুন:'
-                    : '1. Reallocate tasks to another category:'}
-                </p>
-                <div className="flex gap-2">
-                  <select
-                    value={reallocateTargetId}
-                    onChange={e => setReallocateTargetId(e.target.value)}
-                    className="flex-1 px-3 py-2 bg-white dark:bg-[#14201C] border border-[#DCE4E1] dark:border-[#1E302B] rounded-xl text-xs font-medium text-[#17211F] dark:text-stone-100 outline-none"
-                  >
-                    {taskCategories
-                      .filter(c => c.id !== catToDelete.category.id)
-                      .map(c => (
-                        <option key={c.id} value={c.id}>
-                          {lang === 'bn' ? c.nameBn || c.name : c.name}
-                        </option>
-                      ))}
-                  </select>
-                  <button
-                    type="button"
-                    onClick={() => handleExecuteCategoryDeleteWithAction('reallocate')}
-                    disabled={!reallocateTargetId}
-                    className="px-4 py-2 bg-[#007F73] hover:bg-[#00685E] disabled:opacity-50 text-white rounded-xl text-xs font-semibold shadow-xs"
-                  >
-                    {lang === 'bn' ? 'স্থানান্তর ও ডিলিট' : 'Move & Delete'}
-                  </button>
+              {/* Option A: Reallocate to another category (if other categories exist) */}
+              {taskCategories.filter(c => c.id !== catToDelete.category.id).length > 0 && (
+                <div className="p-3.5 bg-[#F0F4F2] dark:bg-[#101A17] rounded-2xl border border-[#DCE4E1] dark:border-[#1E302B]">
+                  <p className="text-xs font-bold text-[#17211F] dark:text-stone-100 mb-2">
+                    {lang === 'bn'
+                      ? '১. কাজগুলো অন্য ক্যাটাগরিতে স্থানান্তর করুন:'
+                      : '1. Reallocate tasks to another category:'}
+                  </p>
+                  <div className="flex gap-2">
+                    <select
+                      value={reallocateTargetId}
+                      onChange={e => setReallocateTargetId(e.target.value)}
+                      className="flex-1 px-3 py-2 bg-white dark:bg-[#14201C] border border-[#DCE4E1] dark:border-[#1E302B] rounded-xl text-xs font-medium text-[#17211F] dark:text-stone-100 outline-none"
+                    >
+                      {taskCategories
+                        .filter(c => c.id !== catToDelete.category.id)
+                        .map(c => (
+                          <option key={c.id} value={c.id}>
+                            {lang === 'bn' ? c.nameBn || c.name : c.name}
+                          </option>
+                        ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => handleExecuteCategoryDeleteWithAction('reallocate')}
+                      disabled={!reallocateTargetId}
+                      className="px-4 py-2 bg-[#007F73] hover:bg-[#00685E] disabled:opacity-50 text-white rounded-xl text-xs font-semibold shadow-xs"
+                    >
+                      {lang === 'bn' ? 'স্থানান্তর ও ডিলিট' : 'Move & Delete'}
+                    </button>
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* Option B: Delete tasks along with category */}
               <div className="p-3.5 bg-rose-50/60 dark:bg-rose-950/20 rounded-2xl border border-rose-200 dark:border-rose-900/60 flex items-center justify-between gap-3">
                 <div>
                   <p className="text-xs font-bold text-rose-700 dark:text-rose-400">
-                    {lang === 'bn' ? '২. এই ক্যাটাগরির সকল কাজ মুছে ফেলুন' : '2. Delete all tasks in this category'}
+                    {taskCategories.filter(c => c.id !== catToDelete.category.id).length > 0
+                      ? (lang === 'bn' ? '২. এই ক্যাটাগরির সকল কাজ মুছে ফেলুন' : '2. Delete all tasks in this category')
+                      : (lang === 'bn' ? 'ক্যাটাগরি ও সকল কাজ মুছে ফেলুন' : 'Delete category and all its tasks')}
                   </p>
                   <p className="text-[10px] text-rose-600/80 dark:text-rose-400/80">
                     {lang === 'bn' ? 'ক্যাটাগরি ও এর ভেতরের কাজগুলো চিরতরে মুছে যাবে' : 'Tasks cannot be recovered'}
@@ -1176,6 +1277,23 @@ export const TaskManagementTab: React.FC<TaskManagementTabProps> = ({
         cancelText={lang === 'bn' ? 'বাতিল' : 'Cancel'}
         onConfirm={executeResetChecklist}
         onCancel={() => setShowResetConfirm(false)}
+        lang={lang}
+      />
+
+      {/* Remove Demo Tasks Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={showRemoveDemoConfirm}
+        title={lang === 'bn' ? 'নমুনা কাজগুলো মুছে ফেলুন' : 'Remove Sample Tasks'}
+        message={
+          lang === 'bn'
+            ? 'আপনি কি নিশ্চিত যে সব নমুনা চেকলিস্ট কাজ মুছে ফেলতে চান? আপনার তৈরি নিজস্ব কাজগুলো অপরিবর্তিত থাকবে।'
+            : 'Are you sure you want to remove all sample checklist tasks? Your custom tasks will not be affected.'
+        }
+        confirmText={lang === 'bn' ? 'মুছে ফেলুন' : 'Remove'}
+        cancelText={lang === 'bn' ? 'বাতিল' : 'Cancel'}
+        isDanger={true}
+        onConfirm={handleRemoveDemoTasks}
+        onCancel={() => setShowRemoveDemoConfirm(false)}
         lang={lang}
       />
 
